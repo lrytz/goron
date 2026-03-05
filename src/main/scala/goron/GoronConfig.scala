@@ -6,7 +6,7 @@ case class GoronConfig(
   entryPoints: List[String] = Nil,
   // Optimizer settings
   optInlineFrom: List[String] = List("**"),
-  optInlineHeuristics: String = "at-inline-annotated-and-higher-order",
+  optInlineHeuristics: String = "default",
   maxInlineSize: Int = 35,
   maxIndyLambdaSize: Int = 40,
   optWarningEmitAtInlineFailed: Boolean = false,

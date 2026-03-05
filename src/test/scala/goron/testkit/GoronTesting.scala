@@ -1,0 +1,239 @@
+package goron.testkit
+
+import scala.collection.mutable.ListBuffer
+import scala.jdk.CollectionConverters._
+import scala.reflect.io.VirtualDirectory
+import scala.tools.asm
+import scala.tools.asm.Opcodes
+import scala.tools.asm.tree.{ClassNode, MethodNode}
+import scala.tools.nsc.{Global, Settings}
+import scala.tools.nsc.reporters.StoreReporter
+
+import goron._
+import goron.optimizer._
+import goron.optimizer.opt.InlineInfoAttributePrototype
+import goron.testkit.ASMConverters._
+
+/** Test infrastructure for goron optimizer tests.
+  *
+  * Provides a Scala compiler (with optimizations disabled) to compile source code strings,
+  * then runs the bytecode through goron's optimizer pipeline.
+  */
+trait GoronTesting extends munit.FunSuite {
+
+  /** Extra goron config overrides for this test class. */
+  def goronConfig: GoronConfig = GoronConfig(
+    inputJars = Nil,
+    outputJar = "",
+    optInlinerEnabled = true,
+    optClosureInvocations = true,
+    optLocalOptimizations = true,
+  )
+
+  // Lazily initialized shared compiler instance (no optimizations)
+  lazy val scalac: ScalacCompiler = GoronTesting.newScalac()
+
+  /** Compile Scala source to class bytes (no optimization). */
+  def compileToBytes(code: String): List[(String, Array[Byte])] =
+    scalac.compileToBytes(code)
+
+  /** Compile Scala source to ClassNodes (no optimization). */
+  def compileClasses(code: String): List[ClassNode] =
+    scalac.compileToBytes(code).map(p => readClass(p._2)).sortBy(_.name)
+
+  /** Compile Scala source, return single ClassNode. */
+  def compileClass(code: String): ClassNode = {
+    val classes = compileClasses(code)
+    assert(classes.size == 1, s"Expected 1 class, got ${classes.size}: ${classes.map(_.name)}")
+    classes.head
+  }
+
+  /** Compile Scala source, optimize with goron, return ClassNodes. */
+  def compileAndOptimize(code: String): List[ClassNode] = {
+    val classBytes = compileToBytes(code)
+    optimizeBytes(classBytes)
+  }
+
+  /** Optimize pre-compiled class bytes through goron's pipeline. */
+  def optimizeBytes(classBytes: List[(String, Array[Byte])]): List[ClassNode] = {
+    val pp = GoronTesting.createPostProcessor(goronConfig)
+    val classNodes = classBytes.map { case (_, bytes) =>
+      val cn = new ClassNode1()
+      new asm.ClassReader(bytes).accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
+      cn
+    }
+
+    // Add all to ByteCodeRepository as "compiling" classes so the inliner considers them
+    for (cn <- classNodes) pp.byteCodeRepository.add(cn, Some("goron-test"))
+
+    // Global optimizations
+    if (goronConfig.optInlinerEnabled || goronConfig.optClosureInvocations)
+      pp.runGlobalOptimizations(classNodes)
+
+    // Local optimizations
+    if (goronConfig.optLocalOptimizations)
+      for (cn <- classNodes) pp.localOptimizations(cn)
+
+    classNodes.sortBy(_.name)
+  }
+
+  /** Compile, optimize, and return a single class. */
+  def compileAndOptimizeClass(code: String): ClassNode = {
+    val classes = compileAndOptimize(code)
+    assert(classes.size == 1, s"Expected 1 class, got ${classes.size}: ${classes.map(_.name)}")
+    classes.head
+  }
+
+  // --- Assertion helpers (adapted from BytecodeTesting) ---
+
+  def assertSameCode(method: Method, expected: List[Instruction]): Unit =
+    assertSameCode(method.instructions.dropNonOp, expected)
+
+  def assertSameCode(actual: List[Instruction], expected: List[Instruction]): Unit = {
+    assert(actual === expected, s"\nExpected: $expected\nActual  : $actual")
+  }
+
+  def assertSameSummary(method: Method, expected: List[Any]): Unit =
+    assertSameSummary(method.instructions, expected)
+
+  def assertSameSummary(actual: List[Instruction], expected: List[Any]): Unit = {
+    def expectedString = expected.map({
+      case s: String => s""""$s""""
+      case i: Int    => opcodeToString(i, i)
+      case x         => throw new MatchError(x)
+    }).mkString("List(", ", ", ")")
+    assert(actual.summary == expected, s"\nFound   : ${actual.summaryText}\nExpected: $expectedString")
+  }
+
+  def assertNoInvoke(m: Method): Unit = assertNoInvoke(m.instructions)
+  def assertNoInvoke(ins: List[Instruction]): Unit = {
+    assert(!ins.exists(_.isInstanceOf[Invoke]), ins.mkString("\n"))
+  }
+
+  def assertInvoke(m: Method, receiver: String, method: String): Unit = assertInvoke(m.instructions, receiver, method)
+  def assertInvoke(l: List[Instruction], receiver: String, method: String): Unit = {
+    assert(l.exists {
+      case Invoke(_, `receiver`, `method`, _, _) => true
+      case _ => false
+    }, l.mkString("\n"))
+  }
+
+  def assertDoesNotInvoke(m: Method, method: String): Unit = assertDoesNotInvoke(m.instructions, method)
+  def assertDoesNotInvoke(l: List[Instruction], method: String): Unit = {
+    assert(!l.exists {
+      case i: Invoke => i.name == method
+      case _ => false
+    }, l.mkString("\n"))
+  }
+
+  def assertInvokedMethods(m: Method, expected: List[String]): Unit = assertInvokedMethods(m.instructions, expected)
+  def assertInvokedMethods(l: List[Instruction], expected: List[String]): Unit = {
+    def quote(l: List[String]) = l.map(s => s""""$s"""").mkString("List(", ", ", ")")
+    val actual = l collect { case i: Invoke => i.owner + "." + i.name }
+    assert(actual == expected, s"\nFound   : ${quote(actual)}\nExpected: ${quote(expected)}")
+  }
+
+  def assertNoIndy(m: Method): Unit = assertNoIndy(m.instructions)
+  def assertNoIndy(l: List[Instruction]): Unit = {
+    val indy = l collect { case i: InvokeDynamic => i }
+    assert(indy.isEmpty, indy.toString)
+  }
+
+  // --- ClassNode / MethodNode helpers ---
+
+  def findClass(cs: List[ClassNode], name: String): ClassNode =
+    cs.find(_.name == name).getOrElse(
+      throw new AssertionError(s"Class $name not found in ${cs.map(_.name)}"))
+
+  def getAsmMethods(c: ClassNode, p: String => Boolean): List[MethodNode] =
+    c.methods.iterator.asScala.filter(m => p(m.name)).toList.sortBy(_.name)
+
+  def getAsmMethods(c: ClassNode, name: String): List[MethodNode] =
+    getAsmMethods(c, _ == name)
+
+  def getAsmMethod(c: ClassNode, name: String): MethodNode = {
+    val methods = getAsmMethods(c, name)
+    assert(methods.size == 1, s"Expected 1 method '$name', found ${methods.size} in ${getAsmMethods(c, _ => true).map(_.name)}")
+    methods.head
+  }
+
+  def getMethods(c: ClassNode, name: String): List[Method] =
+    getAsmMethods(c, name).map(convertMethod)
+
+  def getMethod(c: ClassNode, name: String): Method =
+    convertMethod(getAsmMethod(c, name))
+
+  def getInstructions(c: ClassNode, name: String): List[Instruction] =
+    getMethod(c, name).instructions
+
+  private def readClass(bytes: Array[Byte]): ClassNode = {
+    val cn = new ClassNode()
+    new asm.ClassReader(bytes).accept(cn, 0)
+    cn
+  }
+}
+
+/** Scala compiler wrapper for compiling source strings to bytecode. */
+class ScalacCompiler(val global: Global) {
+  def compileToBytes(code: String): List[(String, Array[Byte])] = {
+    global.reporter.reset()
+    global.settings.outputDirs.setSingleOutput(new VirtualDirectory("(memory)", None))
+    val run = new global.Run()
+    val source = new scala.reflect.internal.util.BatchSourceFile("unitTestSource.scala", code)
+    run.compileSources(List(source))
+    val reporter = global.reporter.asInstanceOf[StoreReporter]
+    val errors = reporter.infos.toList.filter(_.severity == reporter.ERROR)
+    if (errors.nonEmpty) {
+      throw new AssertionError("Compilation failed:\n" + errors.mkString("\n"))
+    }
+    getGeneratedClassfiles(global.settings.outputDirs.getSingleOutput.get)
+  }
+
+  private def getGeneratedClassfiles(outDir: scala.tools.nsc.io.AbstractFile): List[(String, Array[Byte])] = {
+    val res = ListBuffer.empty[(String, Array[Byte])]
+    def collect(dir: scala.tools.nsc.io.AbstractFile): Unit = {
+      for (f <- dir.iterator) {
+        if (!f.isDirectory) res += ((f.name, f.toByteArray))
+        else if (f.name != "." && f.name != "..") collect(f)
+      }
+    }
+    collect(outDir)
+    res.toList
+  }
+}
+
+object GoronTesting {
+  def newScalac(extraArgs: String = ""): ScalacCompiler = {
+    def showError(s: String) = throw new Exception(s)
+    val settings = new Settings(showError)
+    // Use java classpath (requires Test/fork := true in build.sbt)
+    settings.usejavacp.value = true
+    // No optimizations - goron will handle that
+    val args = List("-opt:l:none") ++ (if (extraArgs.nonEmpty) extraArgs.split("\\s+").toList else Nil)
+    val (_, nonSettingsArgs) = settings.processArguments(args, processAll = true)
+    if (nonSettingsArgs.nonEmpty) showError("invalid compiler flags: " + nonSettingsArgs.mkString(" "))
+    val compiler = new ScalacCompiler(new Global(settings, new StoreReporter(settings)))
+    compiler.global.settings.outputDirs.setSingleOutput(new VirtualDirectory("(memory)", None))
+    compiler
+  }
+
+  def createPostProcessor(config: GoronConfig): PostProcessor = {
+    val cp = new RuntimeClasspath(new JarClasspath(Map.empty))
+    val settings = CompilerSettings.fromConfig(config)
+    val reporter = BackendReporting.SilentReporter
+
+    val bt: BTypes = new BTypes { btSelf =>
+      val compilerSettings: CompilerSettings = settings
+      val classpath: Classpath = cp
+      val backendReporting: BackendReporting.Reporter = reporter
+      def isCompilingPrimitive: Boolean = false
+      val coreBTypes: CoreBTypesFromClassfile { val bTypes: btSelf.type } =
+        new { val bTypes: btSelf.type = btSelf } with CoreBTypesFromClassfile
+    }
+    val pp = new PostProcessor {
+      val bTypes: bt.type = bt
+    }
+    pp.initialize()
+    pp
+  }
+}
