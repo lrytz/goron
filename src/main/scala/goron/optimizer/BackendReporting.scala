@@ -323,4 +323,12 @@ object BackendReporting {
     def log(message: String): Unit =
       () // silent by default
   }
+
+  object SilentReporter extends Reporter {
+    def optimizerWarning(pos: Position, message: String, site: String): Unit = ()
+    def error(pos: Position, message: String): Unit = ()
+    def warning(pos: Position, message: String): Unit = ()
+    def inform(message: String): Unit = ()
+    def log(message: String): Unit = ()
+  }
 }

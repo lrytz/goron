@@ -70,14 +70,44 @@ abstract class CoreBTypesFromClassfile extends CoreBTypes {
   val bTypes: BTypes
   import bTypes._
 
-  // Helper: create a ClassBType by internal name. The ClassBType info will be lazily
-  // resolved from classfiles via the BTypesFromClassfile mechanism.
-  protected def classBType(internalName: String): ClassBType =
-    ClassBType(internalName, internalName, fromSymbol = false) { (res, iname) =>
-      // Info will be filled in lazily by BTypesFromClassfile when needed
-      import goron.optimizer.BackendReporting.NoClassBTypeInfoMissingBytecode
-      Left(NoClassBTypeInfoMissingBytecode(BackendReporting.ClassNotFound(iname, definedInJavaSource = false)))
+  // Helper: create a ClassBType by internal name.
+  // Creates a cache entry that will have its info populated when first accessed
+  // via BTypesFromClassfile.classBTypeFromParsedClassfile (which checks the cache first,
+  // then only creates a new entry if one doesn't exist yet).
+  // We create entries with a placeholder Left info that will be replaced.
+  protected def classBType(internalName: String): ClassBType = {
+    // We rely on BTypesFromClassfile.classBTypeFromParsedClassfile being called
+    // for each core type before its info is needed. This happens because the optimizer
+    // loads classes from the bytecode repository, which calls classBTypeFromParsedClassfile.
+    // For core types like java/lang/Object, they will be loaded early.
+    //
+    // The init function resolves from the classpath directly.
+    ClassBType(internalName, (bTypes.classpath, internalName), fromSymbol = false) {
+      case (res, (cp, iname)) =>
+        cp.findClassBytes(iname) match {
+          case None =>
+            Left(BackendReporting.NoClassBTypeInfoMissingBytecode(
+              BackendReporting.ClassNotFound(iname, definedInJavaSource = false)))
+          case Some(bytes) =>
+            val classNode = new scala.tools.asm.tree.ClassNode()
+            new scala.tools.asm.ClassReader(bytes).accept(classNode, scala.tools.asm.ClassReader.SKIP_FRAMES)
+            computeClassInfoFromClassNode(classNode, res)
+        }
     }
+  }
+
+  /** Compute ClassInfo from a parsed ClassNode. Minimal version for core types. */
+  private def computeClassInfoFromClassNode(classNode: scala.tools.asm.tree.ClassNode, classBType: ClassBType): Either[BackendReporting.NoClassBTypeInfo, ClassInfo] = {
+    import scala.jdk.CollectionConverters._
+    val superClass = classNode.superName match {
+      case null => None
+      case superName => Some(this.classBType(superName))
+    }
+    val interfaces = classNode.interfaces.asScala.iterator.map(this.classBType).toList
+    val flags = classNode.access
+    // For core types, we don't need nested class info or inline info
+    Right(ClassInfo(superClass, interfaces, flags, Lazy.withoutLock(Nil), Lazy.withoutLock(None), BTypes.EmptyInlineInfo))
+  }
 
   // Well-known class types
   lazy val srNothingRef             : ClassBType = classBType("scala/runtime/Nothing$")
@@ -181,19 +211,7 @@ abstract class CoreBTypesFromClassfile extends CoreBTypes {
   }.toMap
 
   // Ref class methods
-  private val refClasses: List[(String, PrimitiveBType)] = List(
-    ("scala/runtime/BooleanRef", BOOL),
-    ("scala/runtime/ByteRef",    BYTE),
-    ("scala/runtime/ShortRef",   SHORT),
-    ("scala/runtime/CharRef",    CHAR),
-    ("scala/runtime/IntRef",     INT),
-    ("scala/runtime/LongRef",    LONG),
-    ("scala/runtime/FloatRef",   FLOAT),
-    ("scala/runtime/DoubleRef",  DOUBLE),
-    ("scala/runtime/ObjectRef",  ObjectRef.asInstanceOf[PrimitiveBType]),  // special case, see below
-  )
-
-  private val refClassesProper: List[(String, BType)] = List(
+  private lazy val refClassesProper: List[(String, BType)] = List(
     ("scala/runtime/BooleanRef", BOOL),
     ("scala/runtime/ByteRef",    BYTE),
     ("scala/runtime/ShortRef",   SHORT),

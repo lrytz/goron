@@ -21,3 +21,30 @@ object JarClasspath {
     new JarClasspath(map)
   }
 }
+
+/**
+ * Classpath that falls back to loading classes from the JDK runtime.
+ * This is needed because the optimizer resolves well-known types like java/lang/Object,
+ * java/lang/Character, etc. that are part of the JDK, not the user's jars.
+ */
+class RuntimeClasspath(primary: Classpath) extends Classpath {
+  def findClassBytes(internalName: String): Option[Array[Byte]] =
+    primary.findClassBytes(internalName).orElse(loadFromRuntime(internalName))
+
+  def classNames: Set[String] = primary.classNames
+
+  private def loadFromRuntime(internalName: String): Option[Array[Byte]] = {
+    val resourceName = internalName + ".class"
+    val cl = ClassLoader.getSystemClassLoader
+    val stream = cl.getResourceAsStream(resourceName)
+    if (stream == null) None
+    else {
+      try {
+        val bytes = stream.readAllBytes()
+        Some(bytes)
+      } finally {
+        stream.close()
+      }
+    }
+  }
+}
