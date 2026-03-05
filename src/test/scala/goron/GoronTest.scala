@@ -236,5 +236,52 @@ object GoronTest extends TestSuite {
         assert(cn.name == "com/example/Helper" || cn.name == "com/example/Caller")
       }
     }
+    test("Closed-world analysis marks effectively final") {
+      import scala.tools.asm._
+
+      // Base class with a virtual method
+      val baseBytes = {
+        val cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "com/example/Base", null, "java/lang/Object", null)
+        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC, "greet", "()I", null, null)
+        mv.visitCode()
+        mv.visitInsn(Opcodes.ICONST_1)
+        mv.visitInsn(Opcodes.IRETURN)
+        mv.visitMaxs(1, 1)
+        mv.visitEnd()
+        cw.visitEnd()
+        cw.toByteArray
+      }
+
+      // Leaf class (no subclasses) — should be effectively final
+      val leafBytes = {
+        val cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "com/example/Leaf", null, "com/example/Base", null)
+        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC, "greet", "()I", null, null)
+        mv.visitCode()
+        mv.visitInsn(Opcodes.ICONST_2)
+        mv.visitInsn(Opcodes.IRETURN)
+        mv.visitMaxs(1, 1)
+        mv.visitEnd()
+        cw.visitEnd()
+        cw.toByteArray
+      }
+
+      val baseCn = new scala.tools.asm.tree.ClassNode()
+      new ClassReader(baseBytes).accept(baseCn, 0)
+      val leafCn = new scala.tools.asm.tree.ClassNode()
+      new ClassReader(leafBytes).accept(leafCn, 0)
+
+      val hierarchy = ClosedWorldAnalysis.buildHierarchy(Seq(baseCn, leafCn))
+
+      // Leaf has no subclasses → effectively final
+      assert(hierarchy.effectivelyFinalClasses.contains("com/example/Leaf"))
+      // Base has Leaf as subclass → NOT effectively final
+      assert(!hierarchy.effectivelyFinalClasses.contains("com/example/Base"))
+      // Leaf.greet is effectively final (leaf class)
+      assert(hierarchy.effectivelyFinalMethods.contains(("com/example/Leaf", "greet", "()I")))
+      // Base.greet is NOT effectively final (overridden by Leaf)
+      assert(!hierarchy.effectivelyFinalMethods.contains(("com/example/Base", "greet", "()I")))
+    }
   }
 }

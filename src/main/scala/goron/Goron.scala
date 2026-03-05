@@ -44,6 +44,16 @@ object Goron {
 
     if (config.verbose) println("Running optimizations...")
 
+    // Closed-world analysis: mark effectively-final classes/methods before inlining
+    if (config.closedWorld) {
+      val hierarchy = ClosedWorldAnalysis.buildHierarchy(classNodes)
+      if (config.verbose) {
+        println(s"  Closed-world: ${hierarchy.effectivelyFinalClasses.size} effectively-final classes, " +
+          s"${hierarchy.effectivelyFinalMethods.size} effectively-final methods")
+      }
+      ClosedWorldAnalysis.applyToClassNodes(classNodes, hierarchy)
+    }
+
     // Run global optimizations (inlining, closure optimization) if enabled
     if (config.optInlinerEnabled || config.optClosureInvocations) {
       pp.runGlobalOptimizations(classNodes)
