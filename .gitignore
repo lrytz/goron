@@ -1,0 +1,6 @@
+scala/
+target/
+.bsp/
+.idea/
+*.class
+*.jar
