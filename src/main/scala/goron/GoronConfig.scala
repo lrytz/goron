@@ -7,8 +7,6 @@ case class GoronConfig(
   // Optimizer settings
   optInlineFrom: List[String] = List("**", "!jdk.**", "!java.**", "!sun.**"),
   optInlineHeuristics: String = "default",
-  maxInlineSize: Int = 35,
-  maxIndyLambdaSize: Int = 40,
   optWarningEmitAtInlineFailed: Boolean = false,
   optLocalOptimizations: Boolean = true,
   optInlinerEnabled: Boolean = true,
