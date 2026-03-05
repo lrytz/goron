@@ -272,7 +272,10 @@ abstract class CallGraph {
     for (i <- types.indices) {
       types(i) match {
         case c: ClassBType =>
-          if (c.info.get.inlineInfo.sam.isDefined) res = res.updated(i, c)
+          c.info match {
+            case Right(ci) if ci.inlineInfo.sam.isDefined => res = res.updated(i, c)
+            case _ => // missing class info or no SAM — skip
+          }
 
         case _ =>
       }

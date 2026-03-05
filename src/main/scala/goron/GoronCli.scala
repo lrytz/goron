@@ -15,6 +15,7 @@ object GoronCli {
     var entryPoints = List.empty[String]
     var verbose = false
     var optInlinerEnabled = true
+    var optClosureInvocations = true
     var eliminateDeadCode = true
 
     var remaining = args
@@ -31,6 +32,7 @@ object GoronCli {
           remaining = rest
         case "--no-inline" :: rest =>
           optInlinerEnabled = false
+          optClosureInvocations = false
           remaining = rest
         case "--no-dce" :: rest =>
           eliminateDeadCode = false
@@ -67,6 +69,7 @@ object GoronCli {
       entryPoints = entryPoints,
       verbose = verbose,
       optInlinerEnabled = optInlinerEnabled,
+      optClosureInvocations = optClosureInvocations,
       eliminateDeadCode = eliminateDeadCode,
     ))
   }

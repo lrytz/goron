@@ -409,11 +409,21 @@ abstract class BackendUtils extends PerRunInit {
 
   private class Collector extends NestedClassesCollector[ClassBType](nestedOnly = true) {
     def declaredNestedClasses(internalName: InternalName): List[ClassBType] =
-      bTypesFromClassfile.classBTypeFromParsedClassfile(internalName).info.get.nestedClasses.force
+      try {
+        bTypesFromClassfile.classBTypeFromParsedClassfile(internalName).info match {
+          case Right(ci) => ci.nestedClasses.force
+          case Left(_) => Nil
+        }
+      } catch {
+        case _: Throwable => Nil // gracefully handle missing/broken class info
+      }
 
     def getClassIfNested(internalName: InternalName): Option[ClassBType] = {
       val c = bTypesFromClassfile.classBTypeFromParsedClassfile(internalName)
-      if (c.isNestedClass.get) Some(c) else None
+      c.isNestedClass match {
+        case Right(true) => Some(c)
+        case _ => None
+      }
     }
 
     def raiseError(msg: String, sig: String, e: Option[Throwable]): Unit = {
@@ -446,12 +456,19 @@ abstract class BackendUtils extends PerRunInit {
     // sorting ensures nested classes are listed after their enclosing class thus satisfying the Eclipse Java compiler
     val allNestedClasses = new mutable.TreeSet[ClassBType]()(Ordering.by(_.internalName))
     allNestedClasses ++= declaredInnerClasses
-    refedInnerClasses.foreach(_.enclosingNestedClassesChain.get.foreach(allNestedClasses += _))
+    refedInnerClasses.foreach { c =>
+      c.enclosingNestedClassesChain match {
+        case Right(chain) => chain.foreach(allNestedClasses += _)
+        case Left(_) => // missing class info, skip
+      }
+    }
 
     for (nestedClass <- allNestedClasses) {
-      // Extract the innerClassEntry - we know it exists, enclosingNestedClassesChain only returns nested classes.
-      val Some(e) = nestedClass.innerClassAttributeEntry.get: @unchecked
-      jclass.visitInnerClass(e.name, e.outerName, e.innerName, e.flags)
+      nestedClass.innerClassAttributeEntry match {
+        case Right(Some(e)) =>
+          jclass.visitInnerClass(e.name, e.outerName, e.innerName, e.flags)
+        case _ => // missing info or not a nested class, skip
+      }
     }
   }
 

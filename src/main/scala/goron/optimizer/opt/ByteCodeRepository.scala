@@ -205,7 +205,7 @@ abstract class ByteCodeRepository extends PerRunInit {
   private def parseClass(internalName: InternalName): Either[ClassNotFound, ClassNode] = {
     classpath.findClassBytes(internalName) match {
       case Some(bytes) =>
-        val classNode = new ClassNode()
+        val classNode = new goron.optimizer.ClassNode1()
         val classReader = new asm.ClassReader(bytes)
         try {
           classReader.accept(classNode, Array[Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)

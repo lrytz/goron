@@ -29,9 +29,9 @@ object Goron {
     val pp = createPostProcessor(settings, classpath, reporter)
     pp.initialize()
 
-    // Parse all class entries into ClassNodes
+    // Parse all class entries into ClassNodes (using ClassNode1 for LabelNode1 support)
     val classNodes = classEntries.map { entry =>
-      val cn = new ClassNode()
+      val cn = new ClassNode1()
       val cr = new asm.ClassReader(entry.bytes)
       cr.accept(cn, asm.ClassReader.SKIP_FRAMES)
       cn

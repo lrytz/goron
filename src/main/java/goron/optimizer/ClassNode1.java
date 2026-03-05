@@ -7,7 +7,7 @@ import scala.tools.asm.tree.MethodNode;
 
 public class ClassNode1 extends ClassNode {
     public ClassNode1() {
-        this(Opcodes.ASM6);
+        this(Opcodes.ASM9);
     }
 
     public ClassNode1(int api) {

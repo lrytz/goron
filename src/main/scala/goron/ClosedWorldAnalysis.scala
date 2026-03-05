@@ -124,23 +124,18 @@ object ClosedWorldAnalysis {
    * This marks effectively-final classes and methods so the inliner can be more aggressive.
    */
   def applyToClassNodes(classNodes: Iterable[ClassNode], hierarchy: ClassHierarchy): Unit = {
-    // The InlineInfo is stored as a classfile attribute (ScalaInlineInfo).
-    // For non-Scala classes, the inliner builds InlineInfo from ACC_FINAL flags.
-    // We can set ACC_FINAL on effectively-final classes and methods to communicate
-    // closed-world knowledge to the optimizer.
+    // Only mark methods ACC_FINAL in classes that are themselves effectively final (leaf classes).
+    // Marking methods final in non-leaf classes can cause ClassFormatErrors when methods
+    // override abstract methods from interfaces/traits.
     for (cn <- classNodes) {
-      if (hierarchy.effectivelyFinalClasses.contains(cn.name) && !isFinalClass(cn)) {
-        // Don't actually mark the class final in the bytecode — that could break
-        // class loading if external code tries to extend it. Instead, the inliner
-        // checks InlineInfo.isEffectivelyFinal which we set via the attribute.
-        // For now, we mark methods as final which is safe.
-      }
-      if (cn.methods != null) {
+      val isLeafClass = hierarchy.effectivelyFinalClasses.contains(cn.name)
+      val isInterface = (cn.access & Opcodes.ACC_INTERFACE) != 0
+      if (isLeafClass && !isFinalClass(cn) && !isInterface && cn.methods != null) {
         cn.methods.asScala.foreach { mn =>
-          if (hierarchy.effectivelyFinalMethods.contains((cn.name, mn.name, mn.desc))) {
-            if (!isFinalMethod(mn) && !isStaticMethod(mn) && !isPrivateMethod(mn) && mn.name != "<init>") {
-              mn.access |= Opcodes.ACC_FINAL
-            }
+          val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
+          if (!isFinalMethod(mn) && !isStaticMethod(mn) && !isPrivateMethod(mn)
+              && !isAbstract && mn.name != "<init>" && mn.name != "<clinit>") {
+            mn.access |= Opcodes.ACC_FINAL
           }
         }
       }

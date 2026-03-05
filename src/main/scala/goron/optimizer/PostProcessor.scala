@@ -86,13 +86,23 @@ abstract class PostProcessor extends PerRunInit {
    * types. This operation is used for computing stack map frames.
    */
   final class ClassWriterWithBTypeLub(flags: Int) extends ClassWriter(flags) {
+    private def resolve(iname: String): ClassBType = {
+      val cached = cachedClassBType(iname)
+      if (cached ne null) cached
+      else bTypesFromClassfile.classBTypeFromParsedClassfile(iname)
+    }
+
     override def getCommonSuperClass(inameA: String, inameB: String): String = {
-      val a = cachedClassBType(inameA)
-      val b = cachedClassBType(inameB)
-      val lub = a.jvmWiseLUB(b).get
-      val lubName = lub.internalName
-      assert(lubName != "scala/Any")
-      lubName
+      try {
+        val a = resolve(inameA)
+        val b = resolve(inameB)
+        val lub = a.jvmWiseLUB(b).get
+        val lubName = lub.internalName
+        assert(lubName != "scala/Any")
+        lubName
+      } catch {
+        case _: Throwable => "java/lang/Object"
+      }
     }
   }
 }

@@ -89,7 +89,7 @@ abstract class CoreBTypesFromClassfile extends CoreBTypes {
             Left(BackendReporting.NoClassBTypeInfoMissingBytecode(
               BackendReporting.ClassNotFound(iname, definedInJavaSource = false)))
           case Some(bytes) =>
-            val classNode = new scala.tools.asm.tree.ClassNode()
+            val classNode = new goron.optimizer.ClassNode1()
             new scala.tools.asm.ClassReader(bytes).accept(classNode, scala.tools.asm.ClassReader.SKIP_FRAMES)
             computeClassInfoFromClassNode(classNode, res)
         }
