@@ -71,6 +71,11 @@ Tests use munit. The `GoronTesting` trait provides:
 
 `GoronTesting.scalaLibraryNodes` is a lazy val that parses scala-library once per JVM for integration test performance.
 
+## Workflow
+
+- Always commit when completing a task.
+- Check `TODO.md` for pending work items.
+
 ## Known Limitations
 
 - **Reflection**: Classes loaded via reflection (e.g., `Class.forName`, `ScalaClassLoader.create`) are invisible to static analysis. They must be specified as `--entry` points.
