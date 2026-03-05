@@ -118,6 +118,59 @@ object GoronTest extends TestSuite {
       assert(cn.name == "com/example/Bar")
       assert(cn.methods.size() == 1)
     }
+    test("Dead code elimination") {
+      val tmpIn = File.createTempFile("goron-test-dce-in", ".jar")
+      val tmpOut = File.createTempFile("goron-test-dce-out", ".jar")
+      tmpIn.deleteOnExit()
+      tmpOut.deleteOnExit()
+
+      import scala.tools.asm._
+
+      // Entry class: references Helper
+      val mainBytes = {
+        val cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "com/example/Main", null, "java/lang/Object", null)
+        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "main", "([Ljava/lang/String;)V", null, null)
+        mv.visitCode()
+        mv.visitInsn(Opcodes.ICONST_5)
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC, "com/example/Used", "process", "(I)I", false)
+        mv.visitInsn(Opcodes.POP)
+        mv.visitInsn(Opcodes.RETURN)
+        mv.visitMaxs(1, 1)
+        mv.visitEnd()
+        cw.visitEnd()
+        cw.toByteArray
+      }
+
+      val usedBytes = minimalClassBytes("com/example/Used")
+      val unusedBytes = minimalClassBytes("com/example/Unused")
+
+      val entries = Seq(
+        JarIO.JarEntry("com/example/Main.class", mainBytes, isClass = true),
+        JarIO.JarEntry("com/example/Used.class", usedBytes, isClass = true),
+        JarIO.JarEntry("com/example/Unused.class", unusedBytes, isClass = true),
+      )
+      JarIO.writeJar(tmpIn.getAbsolutePath, entries)
+
+      // Run with DCE enabled, Main as entry point
+      Goron.run(GoronConfig(
+        inputJars = List(tmpIn.getAbsolutePath),
+        outputJar = tmpOut.getAbsolutePath,
+        entryPoints = List("com/example/Main"),
+        eliminateDeadCode = true,
+        optInlinerEnabled = false,
+        optClosureInvocations = false,
+        optLocalOptimizations = false,
+      ))
+
+      val result = JarIO.readJar(tmpOut.getAbsolutePath)
+      val classNames = result.filter(_.isClass).map(_.name).toSet
+      // Main and Used should be kept, Unused should be eliminated
+      assert(classNames.contains("com/example/Main.class"))
+      assert(classNames.contains("com/example/Used.class"))
+      assert(!classNames.contains("com/example/Unused.class"))
+    }
+
     test("Global inlining roundtrip") {
       val tmpIn = File.createTempFile("goron-test-inline-in", ".jar")
       val tmpOut = File.createTempFile("goron-test-inline-out", ".jar")

@@ -56,8 +56,20 @@ object Goron {
       }
     }
 
+    // Dead code elimination: filter to reachable classes only
+    val outputClassNodes = if (config.eliminateDeadCode && config.entryPoints.nonEmpty) {
+      val reachable = ReachabilityAnalysis.reachableClasses(classNodes, config.entryPoints.toSet)
+      if (config.verbose) {
+        val removed = classNodes.size - reachable.size
+        println(s"  Dead code elimination: keeping ${reachable.size} of ${classNodes.size} classes ($removed removed)")
+      }
+      classNodes.filter(cn => reachable.contains(cn.name))
+    } else {
+      classNodes
+    }
+
     // Serialize optimized classes back to bytes
-    val optimizedEntries = classNodes.map { cn =>
+    val optimizedEntries = outputClassNodes.map { cn =>
       pp.setInnerClasses(cn)
       val bytes = pp.serializeClass(cn)
       JarIO.JarEntry(cn.name + ".class", bytes, isClass = true)
