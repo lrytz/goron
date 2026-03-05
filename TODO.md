@@ -12,4 +12,5 @@
   - Replace `LazyVar` / `perRunLazy` / `PerRunInit` with plain `lazy val`s (goron runs once per JVM, no multi-run reset needed)
   - Remove `ClearableJConcurrentHashMap` (unused)
   - Clean up stale comments referencing GenBCode, PostProcessorFrontendAccess, compiler symbols
+- [ ] Set up scalafmt
 - [ ] Make closed-world analysis update InlineInfo so the inliner can exploit effectively-final methods on Scala classes (currently only sets ACC_FINAL, which the inliner ignores in favor of ScalaInlineInfo's effectivelyFinal)
