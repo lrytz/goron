@@ -1,0 +1,98 @@
+/*
+ * Scala (https://www.scala-lang.org)
+ *
+ * Copyright EPFL and Lightbend, Inc. dba Akka
+ *
+ * Licensed under Apache License 2.0
+ * (http://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership.
+ */
+
+package goron.optimizer
+
+import scala.collection.mutable
+import scala.tools.asm.{ClassWriter, Opcodes}
+import scala.tools.asm.tree.ClassNode
+import goron.optimizer.analysis.BackendUtils
+import goron.optimizer.opt._
+
+/**
+ * Implements late stages of the backend that don't depend on a Global instance, i.e.,
+ * optimizations, post-processing and classfile serialization and writing.
+ */
+abstract class PostProcessor extends PerRunInit {
+  self =>
+  val bTypes: BTypes
+
+  import bTypes._
+
+  def compilerSettings: CompilerSettings = bTypes.compilerSettings
+  def backendReporting: BackendReporting.Reporter = bTypes.backendReporting
+
+  val backendUtils        : BackendUtils        { val postProcessor: self.type } = new { val postProcessor: self.type = self } with BackendUtils
+  val byteCodeRepository  : ByteCodeRepository  { val postProcessor: self.type } = new { val postProcessor: self.type = self } with ByteCodeRepository
+  val localOpt            : LocalOpt            { val postProcessor: self.type } = new { val postProcessor: self.type = self } with LocalOpt
+  val inliner             : Inliner             { val postProcessor: self.type } = new { val postProcessor: self.type = self } with Inliner
+  val inlinerHeuristics   : InlinerHeuristics   { val postProcessor: self.type } = new { val postProcessor: self.type = self } with InlinerHeuristics
+  val closureOptimizer    : ClosureOptimizer    { val postProcessor: self.type } = new { val postProcessor: self.type = self } with ClosureOptimizer
+  val callGraph           : CallGraph           { val postProcessor: self.type } = new { val postProcessor: self.type = self } with CallGraph
+  val bTypesFromClassfile : BTypesFromClassfile { val postProcessor: self.type } = new { val postProcessor: self.type = self } with BTypesFromClassfile
+
+  override def initialize(): Unit = {
+    super.initialize()
+    backendUtils.initialize()
+    inlinerHeuristics.initialize()
+    byteCodeRepository.initialize()
+  }
+
+  /**
+   * Run global optimizations: build call graph, inline, optimize closures.
+   * Called by goron after all classes have been added to the ByteCodeRepository.
+   */
+  def runGlobalOptimizations(classNodes: Iterable[ClassNode]): Unit = {
+    if (compilerSettings.optAddToBytecodeRepository) {
+      if (compilerSettings.optBuildCallGraph) {
+        for (c <- classNodes) {
+          callGraph.addClass(c)
+        }
+      }
+      if (compilerSettings.optInlinerEnabled)
+        inliner.runInlinerAndClosureOptimizer()
+      else if (compilerSettings.optClosureInvocations)
+        closureOptimizer.rewriteClosureApplyInvocations(None, mutable.Map.empty)
+    }
+  }
+
+  def localOptimizations(classNode: ClassNode): Unit = {
+    localOpt.methodOptimizations(classNode)
+  }
+
+  def setInnerClasses(classNode: ClassNode): Unit = {
+    classNode.innerClasses.clear()
+    val (declared, referred) = backendUtils.collectNestedClasses(classNode)
+    backendUtils.addInnerClasses(classNode, declared, referred)
+  }
+
+  def serializeClass(classNode: ClassNode): Array[Byte] = {
+    val cw = new ClassWriterWithBTypeLub(backendUtils.extraProc.get)
+    classNode.accept(cw)
+    cw.toByteArray
+  }
+
+  /**
+   * An asm ClassWriter that uses ClassBType.jvmWiseLUB to compute the common superclass of class
+   * types. This operation is used for computing stack map frames.
+   */
+  final class ClassWriterWithBTypeLub(flags: Int) extends ClassWriter(flags) {
+    override def getCommonSuperClass(inameA: String, inameB: String): String = {
+      val a = cachedClassBType(inameA)
+      val b = cachedClassBType(inameB)
+      val lub = a.jvmWiseLUB(b).get
+      val lubName = lub.internalName
+      assert(lubName != "scala/Any")
+      lubName
+    }
+  }
+}
