@@ -84,9 +84,9 @@ class IntegrationTest extends GoronTesting {
     val names = survivingClassNames(survivors)
     val scalaLibCount = names.count(_.startsWith("scala/"))
     val totalLibClasses = goron.testkit.GoronTesting.scalaLibraryNodes.size
-    // A simple println app should keep well under all of scala-library
-    assert(scalaLibCount < totalLibClasses * 3 / 4,
-      s"Expected significant scala-library elimination, but kept $scalaLibCount of $totalLibClasses")
+    // Method-level DCE: a println app should keep only a small fraction of scala-library
+    assert(scalaLibCount < 200,
+      s"Expected <200 scala-library classes for println app, but kept $scalaLibCount of $totalLibClasses")
   }
 
   // --- Inlining tests ---
