@@ -5,9 +5,9 @@ lazy val goron = (project in file("."))
     scalaVersion := "2.13.18",
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" % "scala-asm" % "9.9.0-scala-1",
-      "com.lihaoyi" %% "utest" % "0.8.5" % Test,
+      "org.scalameta" %% "munit" % "1.2.4" % Test,
     ),
-    testFrameworks += new TestFramework("utest.runner.Framework"),
+    testFrameworks += new TestFramework("munit.Framework"),
     Compile / mainClass := Some("goron.GoronCli"),
     assembly / mainClass := Some("goron.GoronCli"),
     assembly / assemblyJarName := "goron.jar",
