@@ -37,45 +37,67 @@ object Goron {
       cn
     }
 
-    // Add all classes to the ByteCodeRepository
-    for (cn <- classNodes) {
-      pp.byteCodeRepository.add(cn, None)
+    // Determine reachable classes first — only these will be optimized.
+    // All classes are added to ByteCodeRepository for type resolution, but only
+    // reachable classes are added as "compiling" (eligible for inlining into).
+    val reachableNames = if (config.entryPoints.nonEmpty) {
+      val reachable = ReachabilityAnalysis.reachableClasses(classNodes, config.entryPoints.toSet)
+      if (config.verbose) {
+        println(s"  Reachability: ${reachable.size} of ${classNodes.size} classes reachable from entry points")
+      }
+      reachable
+    } else {
+      // No entry points specified — treat all classes as reachable
+      classNodes.map(_.name).toSet
     }
+
+    // Add reachable classes as "compiling" (inliner will optimize these),
+    // unreachable classes as "parsed" (available for type resolution only)
+    for (cn <- classNodes) {
+      if (reachableNames.contains(cn.name))
+        pp.byteCodeRepository.add(cn, Some("goron"))
+      else
+        pp.byteCodeRepository.add(cn, None)
+    }
+
+    val reachableClassNodes = classNodes.filter(cn => reachableNames.contains(cn.name))
 
     if (config.verbose) println("Running optimizations...")
 
     // Closed-world analysis: mark effectively-final classes/methods before inlining
     if (config.closedWorld) {
+      // Analyze hierarchy across ALL classes for accurate finality analysis
       val hierarchy = ClosedWorldAnalysis.buildHierarchy(classNodes)
       if (config.verbose) {
         println(s"  Closed-world: ${hierarchy.effectivelyFinalClasses.size} effectively-final classes, " +
           s"${hierarchy.effectivelyFinalMethods.size} effectively-final methods")
       }
-      ClosedWorldAnalysis.applyToClassNodes(classNodes, hierarchy)
+      // But only apply finality markers to reachable classes (the ones we'll serialize)
+      ClosedWorldAnalysis.applyToClassNodes(reachableClassNodes, hierarchy)
     }
 
-    // Run global optimizations (inlining, closure optimization) if enabled
+    // Run global optimizations (inlining, closure optimization) on reachable classes
     if (config.optInlinerEnabled || config.optClosureInvocations) {
-      pp.runGlobalOptimizations(classNodes)
+      pp.runGlobalOptimizations(reachableClassNodes)
     }
 
-    // Run local optimizations per class
+    // Run local optimizations per reachable class
     if (config.optLocalOptimizations) {
-      for (cn <- classNodes) {
+      for (cn <- reachableClassNodes) {
         pp.localOptimizations(cn)
       }
     }
 
-    // Dead code elimination: filter to reachable classes only
     val outputClassNodes = if (config.eliminateDeadCode && config.entryPoints.nonEmpty) {
-      val reachable = ReachabilityAnalysis.reachableClasses(classNodes, config.entryPoints.toSet)
+      // Run DCE again — inlining may have made more classes unreachable
+      val reachable = ReachabilityAnalysis.reachableClasses(reachableClassNodes, config.entryPoints.toSet)
       if (config.verbose) {
-        val removed = classNodes.size - reachable.size
-        println(s"  Dead code elimination: keeping ${reachable.size} of ${classNodes.size} classes ($removed removed)")
+        val removed = reachableClassNodes.size - reachable.size
+        println(s"  Dead code elimination: keeping ${reachable.size} of ${reachableClassNodes.size} classes ($removed removed)")
       }
-      classNodes.filter(cn => reachable.contains(cn.name))
+      reachableClassNodes.filter(cn => reachable.contains(cn.name))
     } else {
-      classNodes
+      reachableClassNodes
     }
 
     // Serialize optimized classes back to bytes
