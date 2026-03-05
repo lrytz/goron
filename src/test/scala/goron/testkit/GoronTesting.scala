@@ -19,7 +19,7 @@ import goron.testkit.ASMConverters._
   * Provides a Scala compiler (with optimizations disabled) to compile source code strings,
   * then runs the bytecode through goron's optimizer pipeline.
   */
-trait GoronTesting extends munit.FunSuite {
+trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
 
   /** Extra goron config overrides for this test class. */
   def goronConfig: GoronConfig = GoronConfig(
@@ -202,7 +202,102 @@ class ScalacCompiler(val global: Global) {
   }
 }
 
+/** Helpers for integration tests that run goron over user classes + scala-library. */
+trait GoronIntegrationHelpers { self: GoronTesting =>
+
+  /** Compile user code, combine with scala-library, and run the full goron pipeline.
+    * Returns surviving ClassNodes after DCE + optimization + DCE.
+    */
+  def compileAndRunFullPipeline(
+    code: String,
+    entryPoints: Set[String],
+    config: GoronConfig = goronConfig,
+  ): List[ClassNode] = {
+    val userBytes = compileToBytes(code)
+    val userNodes = userBytes.map { case (_, bytes) =>
+      val cn = new ClassNode1()
+      new asm.ClassReader(bytes).accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
+      cn
+    }
+
+    val libNodes = GoronTesting.scalaLibraryNodes
+
+    val allNodes = userNodes ++ libNodes
+
+    // First reachability pass
+    val reachableNames = ReachabilityAnalysis.reachableClasses(allNodes, entryPoints)
+    val reachableNodes = allNodes.filter(cn => reachableNames.contains(cn.name))
+    val unreachableNodes = allNodes.filterNot(cn => reachableNames.contains(cn.name))
+
+    // Set up optimizer
+    val pp = GoronTesting.createPostProcessor(config)
+
+    for (cn <- reachableNodes) pp.byteCodeRepository.add(cn, Some("goron-test"))
+    for (cn <- unreachableNodes) pp.byteCodeRepository.add(cn, None)
+
+    // Closed-world analysis (matches Goron.run ordering)
+    if (config.closedWorld) {
+      val hierarchy = ClosedWorldAnalysis.buildHierarchy(allNodes)
+      ClosedWorldAnalysis.applyToClassNodes(reachableNodes, hierarchy)
+    }
+
+    // Global optimizations
+    if (config.optInlinerEnabled || config.optClosureInvocations)
+      pp.runGlobalOptimizations(reachableNodes)
+
+    // Local optimizations
+    if (config.optLocalOptimizations)
+      for (cn <- reachableNodes) pp.localOptimizations(cn)
+
+    // Second DCE pass
+    if (config.eliminateDeadCode && entryPoints.nonEmpty) {
+      val reachable2 = ReachabilityAnalysis.reachableClasses(reachableNodes, entryPoints)
+      reachableNodes.filter(cn => reachable2.contains(cn.name))
+    } else {
+      reachableNodes
+    }
+  }
+
+  def survivingClassNames(classes: List[ClassNode]): Set[String] =
+    classes.map(_.name).toSet
+}
+
 object GoronTesting {
+  /** Find scala-library.jar from the classloader URL chain. */
+  def findScalaLibraryJar(): String = {
+    import java.net.URLClassLoader
+    val urls = Iterator.iterate(getClass.getClassLoader: ClassLoader)(_.getParent)
+      .takeWhile(_ != null)
+      .flatMap {
+        case ucl: URLClassLoader => ucl.getURLs.iterator
+        case _ => Iterator.empty
+      }.toList
+
+    val jarUrl = urls.find { u =>
+      val path = u.getPath
+      path.contains("scala-library") && path.endsWith(".jar")
+    }.getOrElse {
+      // Fallback: search java.class.path
+      val cp = System.getProperty("java.class.path", "")
+      val entry = cp.split(java.io.File.pathSeparator).find(p =>
+        p.contains("scala-library") && p.endsWith(".jar")
+      ).getOrElse(throw new RuntimeException("Cannot find scala-library.jar on classpath"))
+      new java.io.File(entry).toURI.toURL
+    }
+    new java.io.File(jarUrl.toURI).getAbsolutePath
+  }
+
+  /** Cached scala-library ClassNodes. Parsed once per JVM. */
+  lazy val scalaLibraryNodes: List[ClassNode] = {
+    val jarPath = findScalaLibraryJar()
+    val entries = JarIO.readJar(jarPath)
+    entries.filter(_.isClass).map { entry =>
+      val cn = new ClassNode1()
+      new asm.ClassReader(entry.bytes).accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
+      cn
+    }.toList
+  }
+
   def newScalac(extraArgs: String = ""): ScalacCompiler = {
     def showError(s: String) = throw new Exception(s)
     val settings = new Settings(showError)

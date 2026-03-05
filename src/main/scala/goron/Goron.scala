@@ -3,6 +3,7 @@ package goron
 import scala.tools.asm
 import scala.tools.asm.tree.ClassNode
 import goron.optimizer._
+import goron.optimizer.opt.InlineInfoAttributePrototype
 
 object Goron {
   def run(config: GoronConfig): Unit = {
@@ -33,7 +34,7 @@ object Goron {
     val classNodes = classEntries.map { entry =>
       val cn = new ClassNode1()
       val cr = new asm.ClassReader(entry.bytes)
-      cr.accept(cn, asm.ClassReader.SKIP_FRAMES)
+      cr.accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
       cn
     }
 
