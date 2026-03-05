@@ -12,5 +12,10 @@ lazy val goron = (project in file("."))
     Compile / mainClass := Some("goron.GoronCli"),
     assembly / mainClass := Some("goron.GoronCli"),
     assembly / assemblyJarName := "goron.jar",
-    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
+    scalacOptions ++= Seq(
+      "-deprecation", "-feature", "-unchecked", "-Werror",
+      // Suppress warnings inherent to the cake pattern in forked compiler code
+      "-Wconf:msg=early initializers are deprecated:s",
+      "-Wconf:msg=The outer reference in this type test cannot be checked at run time:s",
+    ),
   )
