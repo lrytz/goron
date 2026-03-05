@@ -118,5 +118,70 @@ object GoronTest extends TestSuite {
       assert(cn.name == "com/example/Bar")
       assert(cn.methods.size() == 1)
     }
+    test("Global inlining roundtrip") {
+      val tmpIn = File.createTempFile("goron-test-inline-in", ".jar")
+      val tmpOut = File.createTempFile("goron-test-inline-out", ".jar")
+      tmpIn.deleteOnExit()
+      tmpOut.deleteOnExit()
+
+      import scala.tools.asm._
+
+      // Class A: public final class with a static method
+      val helperBytes = {
+        val cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL, "com/example/Helper", null, "java/lang/Object", null)
+        // public static final int double(int x) { return x + x; }
+        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, "twice", "(I)I", null, null)
+        mv.visitCode()
+        mv.visitVarInsn(Opcodes.ILOAD, 0)
+        mv.visitVarInsn(Opcodes.ILOAD, 0)
+        mv.visitInsn(Opcodes.IADD)
+        mv.visitInsn(Opcodes.IRETURN)
+        mv.visitMaxs(2, 1)
+        mv.visitEnd()
+        cw.visitEnd()
+        cw.toByteArray
+      }
+
+      // Class B: calls Helper.twice
+      val callerBytes = {
+        val cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "com/example/Caller", null, "java/lang/Object", null)
+        // public static int callTwice(int x) { return Helper.twice(x); }
+        val mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "callTwice", "(I)I", null, null)
+        mv.visitCode()
+        mv.visitVarInsn(Opcodes.ILOAD, 0)
+        mv.visitMethodInsn(Opcodes.INVOKESTATIC, "com/example/Helper", "twice", "(I)I", false)
+        mv.visitInsn(Opcodes.IRETURN)
+        mv.visitMaxs(2, 1)
+        mv.visitEnd()
+        cw.visitEnd()
+        cw.toByteArray
+      }
+
+      val entries = Seq(
+        JarIO.JarEntry("com/example/Helper.class", helperBytes, isClass = true),
+        JarIO.JarEntry("com/example/Caller.class", callerBytes, isClass = true),
+      )
+      JarIO.writeJar(tmpIn.getAbsolutePath, entries)
+
+      // Run with inlining enabled
+      Goron.run(GoronConfig(
+        inputJars = List(tmpIn.getAbsolutePath),
+        outputJar = tmpOut.getAbsolutePath,
+        optInlinerEnabled = true,
+        optClosureInvocations = true,
+        optLocalOptimizations = true,
+      ))
+
+      // Verify the output is valid
+      val result = JarIO.readJar(tmpOut.getAbsolutePath)
+      assert(result.size == 2)
+      for (entry <- result) {
+        val cn = new scala.tools.asm.tree.ClassNode()
+        new scala.tools.asm.ClassReader(entry.bytes).accept(cn, 0)
+        assert(cn.name == "com/example/Helper" || cn.name == "com/example/Caller")
+      }
+    }
   }
 }
