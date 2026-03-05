@@ -156,7 +156,7 @@ abstract class CoreBTypesFromClassfile extends CoreBTypes {
   lazy val boxedClasses: Set[ClassBType] = boxedClassOfPrimitive.values.toSet
 
   // Boxing/unboxing method descriptors (hardcoded from known JDK/Scala signatures)
-  private val primitiveInfo: List[(String, PrimitiveBType, String, String)] = List(
+  private lazy val primitiveInfo: List[(String, PrimitiveBType, String, String)] = List(
     // (primName, primBType, boxedInternalName, unboxMethodName)
     ("Boolean", BOOL,   "java/lang/Boolean",   "booleanValue"),
     ("Byte",    BYTE,   "java/lang/Byte",      "byteValue"),

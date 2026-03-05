@@ -31,14 +31,14 @@ abstract class PostProcessor extends PerRunInit {
   def compilerSettings: CompilerSettings = bTypes.compilerSettings
   def backendReporting: BackendReporting.Reporter = bTypes.backendReporting
 
-  val backendUtils        : BackendUtils        { val postProcessor: self.type } = new { val postProcessor: self.type = self } with BackendUtils
-  val byteCodeRepository  : ByteCodeRepository  { val postProcessor: self.type } = new { val postProcessor: self.type = self } with ByteCodeRepository
-  val localOpt            : LocalOpt            { val postProcessor: self.type } = new { val postProcessor: self.type = self } with LocalOpt
-  val inliner             : Inliner             { val postProcessor: self.type } = new { val postProcessor: self.type = self } with Inliner
-  val inlinerHeuristics   : InlinerHeuristics   { val postProcessor: self.type } = new { val postProcessor: self.type = self } with InlinerHeuristics
-  val closureOptimizer    : ClosureOptimizer    { val postProcessor: self.type } = new { val postProcessor: self.type = self } with ClosureOptimizer
-  val callGraph           : CallGraph           { val postProcessor: self.type } = new { val postProcessor: self.type = self } with CallGraph
-  val bTypesFromClassfile : BTypesFromClassfile { val postProcessor: self.type } = new { val postProcessor: self.type = self } with BTypesFromClassfile
+  lazy val backendUtils        : BackendUtils        { val postProcessor: self.type } = new BackendUtils        { val postProcessor: self.type = self }
+  lazy val byteCodeRepository  : ByteCodeRepository  { val postProcessor: self.type } = new ByteCodeRepository  { val postProcessor: self.type = self }
+  lazy val localOpt            : LocalOpt            { val postProcessor: self.type } = new LocalOpt            { val postProcessor: self.type = self }
+  lazy val inliner             : Inliner             { val postProcessor: self.type } = new Inliner             { val postProcessor: self.type = self }
+  lazy val inlinerHeuristics   : InlinerHeuristics   { val postProcessor: self.type } = new InlinerHeuristics   { val postProcessor: self.type = self }
+  lazy val closureOptimizer    : ClosureOptimizer    { val postProcessor: self.type } = new ClosureOptimizer    { val postProcessor: self.type = self }
+  lazy val callGraph           : CallGraph           { val postProcessor: self.type } = new CallGraph           { val postProcessor: self.type = self }
+  lazy val bTypesFromClassfile : BTypesFromClassfile { val postProcessor: self.type } = new BTypesFromClassfile { val postProcessor: self.type = self }
 
   override def initialize(): Unit = {
     super.initialize()

@@ -339,8 +339,8 @@ object GoronTesting {
       val classpath: Classpath = cp
       val backendReporting: BackendReporting.Reporter = reporter
       def isCompilingPrimitive: Boolean = false
-      val coreBTypes: CoreBTypesFromClassfile { val bTypes: btSelf.type } =
-        new { val bTypes: btSelf.type = btSelf } with CoreBTypesFromClassfile
+      lazy val coreBTypes: CoreBTypesFromClassfile { val bTypes: btSelf.type } =
+        new CoreBTypesFromClassfile { val bTypes: btSelf.type = btSelf }
     }
     val pp = new PostProcessor {
       val bTypes: bt.type = bt

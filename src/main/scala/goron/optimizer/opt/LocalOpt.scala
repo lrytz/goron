@@ -161,10 +161,10 @@ abstract class LocalOpt {
 
   import LocalOptImpls._
 
-  val boxUnbox = new BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor }
+  lazy val boxUnbox: BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type } = new BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor }
   import boxUnbox._
 
-  val copyProp = new CopyProp { val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor }
+  lazy val copyProp: CopyProp { val postProcessor: LocalOpt.this.postProcessor.type } = new CopyProp { val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor }
   import copyProp._
 
   /**
