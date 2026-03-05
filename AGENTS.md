@@ -8,55 +8,9 @@ The optimizer is forked from the Scala 2.13 compiler backend (~30 files), re-pac
 
 ## Project Structure
 
-```
-src/main/scala/goron/
-  Goron.scala                  # Main pipeline: read jars -> optimize -> write jar
-  GoronCli.scala               # CLI entry point (--input, --output, --entry, etc.)
-  GoronConfig.scala            # Configuration case class
-  JarIO.scala                  # Jar read/write utilities
-  Classpath.scala              # Classpath abstraction (JarClasspath, RuntimeClasspath)
-  ReachabilityAnalysis.scala   # Two-phase dead code analysis (method-level BFS + load closure)
-  ClosedWorldAnalysis.scala    # Marks effectively-final classes/methods
-
-  optimizer/                   # Forked from scala.tools.nsc.backend.jvm
-    BTypes.scala               # Type hierarchy (cake pattern root)
-    BTypesFromClassfile.scala   # Creates BTypes from parsed classfiles
-    CoreBTypes.scala           # Well-known JVM types (Object, String, boxed types)
-    PostProcessor.scala        # Orchestrates all optimizations
-    BackendReporting.scala     # Warning/error types + reporter trait
-    CompilerSettings.scala     # Optimizer settings (wraps GoronConfig)
-    AsmUtils.scala             # ASM utilities
-    PerRunInit.scala           # Cache clearing infrastructure
-    Position.scala             # Simple position type (replaces compiler Position)
-    opt/
-      ByteCodeRepository.scala # Loads/caches ClassNodes
-      CallGraph.scala          # Call graph representation
-      Inliner.scala            # Inlining engine
-      InlinerHeuristics.scala  # Inlining decision logic
-      ClosureOptimizer.scala   # Closure invocation rewriting (removes InvokeDynamic)
-      LocalOpt.scala           # Per-method optimization fixpoint loop
-      BoxUnbox.scala           # Box/unbox elimination
-      CopyProp.scala           # Copy propagation
-      BytecodeUtils.scala      # Bytecode analysis utilities
-      InlineInfoAttribute.scala # ScalaInlineInfo classfile attribute
-      FifoCache.scala          # LRU cache
-    analysis/
-      BackendUtils.scala       # Analysis utilities
-      AsmAnalyzer.scala, AliasingAnalyzer.scala, NullnessAnalyzer.scala
-      ProdConsAnalyzer.scala, TypeFlowAnalyzer.scala
-      InstructionStackEffect.scala, package.scala
-
-src/test/scala/goron/
-  testkit/
-    GoronTesting.scala         # Test infrastructure: embedded compiler, pipeline helpers
-    ASMConverters.scala        # ASM bytecode -> readable instruction types
-  InlinerTest.scala            # Inliner unit tests
-  ClosureOptimizerTest.scala   # Closure optimization tests
-  MethodLevelOptsTest.scala    # Local optimization tests
-  BoxUnboxTest.scala           # Box/unbox elimination tests
-  GoronTest.scala              # Basic pipeline tests
-  IntegrationTest.scala        # Full pipeline tests (user code + scala-library)
-```
+- `src/main/scala/goron/` — Goron's own code: pipeline (`Goron.scala`), CLI (`GoronCli.scala`), config, jar I/O, classpath, reachability analysis, closed-world analysis.
+- `src/main/scala/goron/optimizer/` — Forked from `scala.tools.nsc.backend.jvm` (~30 files). Inliner, closure optimizer, local optimizations, call graph, type hierarchy (cake pattern). Mostly unchanged from upstream except replacing compiler-frontend dependencies.
+- `src/test/scala/goron/` — munit tests. `testkit/GoronTesting.scala` provides an embedded compiler and pipeline helpers. `IntegrationTest.scala` runs the full pipeline with scala-library.
 
 ## Build & Test
 
