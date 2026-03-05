@@ -13,5 +13,4 @@ lazy val goron = (project in file("."))
     assembly / mainClass := Some("goron.GoronCli"),
     assembly / assemblyJarName := "goron.jar",
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
-    Test / fork := true,
   )

@@ -206,8 +206,9 @@ object GoronTesting {
   def newScalac(extraArgs: String = ""): ScalacCompiler = {
     def showError(s: String) = throw new Exception(s)
     val settings = new Settings(showError)
-    // Use java classpath (requires Test/fork := true in build.sbt)
-    settings.usejavacp.value = true
+    // Build the classpath explicitly from the current classloader so this works
+    // both in sbt's in-process test runner and in a forked JVM.
+    settings.classpath.value = classPathFromClassLoader(getClass.getClassLoader)
     // No optimizations - goron will handle that
     val args = List("-opt:l:none") ++ (if (extraArgs.nonEmpty) extraArgs.split("\\s+").toList else Nil)
     val (_, nonSettingsArgs) = settings.processArguments(args, processAll = true)
@@ -217,8 +218,24 @@ object GoronTesting {
     compiler
   }
 
+  /** Extract classpath entries from a classloader by walking its parent chain. */
+  private def classPathFromClassLoader(cl: ClassLoader): String = {
+    import java.net.URLClassLoader
+    val urls = Iterator.iterate(cl)(_.getParent).takeWhile(_ != null).flatMap {
+      case ucl: URLClassLoader => ucl.getURLs.iterator
+      case _ => Iterator.empty
+    }.toList
+    if (urls.nonEmpty)
+      urls.map(u => new java.io.File(u.toURI).getAbsolutePath).mkString(java.io.File.pathSeparator)
+    else
+      // Last resort: java.class.path (works when the JVM is forked)
+      System.getProperty("java.class.path", "")
+  }
+
   def createPostProcessor(config: GoronConfig): PostProcessor = {
-    val cp = new RuntimeClasspath(new JarClasspath(Map.empty))
+    // Use the current classloader so that scala-library classes are findable
+    // even in sbt's in-process test runner (where the system classloader doesn't see them)
+    val cp = new RuntimeClasspath(new JarClasspath(Map.empty), getClass.getClassLoader)
     val settings = CompilerSettings.fromConfig(config)
     val reporter = BackendReporting.SilentReporter
 
