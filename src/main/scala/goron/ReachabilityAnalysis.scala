@@ -6,26 +6,26 @@ import scala.tools.asm.{Handle, Opcodes, Type}
 import scala.tools.asm.tree._
 
 /**
- * Whole-program reachability analysis. Starting from entry point classes,
- * performs BFS at method granularity to discover reachable classes.
+ * Whole-program reachability analysis in two phases:
  *
- * Method-level analysis means that if a class has 100 methods but only 1 is
- * called, only that method's references are followed — not the other 99.
- * This dramatically reduces the reachable set for programs using large libraries.
+ * Phase 1 (method-level BFS): Starting from entry point classes, follows method
+ * calls at method granularity. If a class has 100 methods but only 1 is called,
+ * only that method's references are followed. This determines the "execution-reachable"
+ * set — classes whose code will actually run.
  *
- * References followed:
- * - Method invocations (INVOKE*)
- * - Field accesses (trigger class reachability + field type refs)
- * - Type references in instructions (NEW, CHECKCAST, etc.)
- * - Super class and interface chains
- * - Static initializers (<clinit>) of any newly reachable class
- * - Bootstrap method references (invokedynamic)
+ * Phase 2 (load closure): For each execution-reachable class, ensures all classes
+ * referenced anywhere in its classfile (method bodies, descriptors, constant pool)
+ * are also present. These "load-reachable" classes are needed for JVM class loading
+ * and verification, but their own method bodies are NOT traversed — only their
+ * type hierarchy and descriptor types are followed transitively.
+ *
+ * This two-phase approach eliminates unreferenced classes aggressively while
+ * ensuring retained classes can actually be loaded by the JVM.
  */
 object ReachabilityAnalysis {
 
   /**
    * Compute the set of reachable class internal names, starting from the given entry points.
-   * Uses method-level granularity: only methods that are actually called contribute references.
    *
    * @param classNodes all classes in the program
    * @param entryPoints internal names of entry point classes (all their methods are roots)
@@ -37,9 +37,24 @@ object ReachabilityAnalysis {
   ): Set[String] = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
 
+    // Phase 1: method-level BFS to find execution-reachable classes
+    val execReachable = methodLevelBFS(classByName, entryPoints)
+
+    // Phase 2: load closure — ensure all classes referenced by retained classes are loadable
+    loadClosure(execReachable, classByName)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 1: Method-level BFS
+  // ---------------------------------------------------------------------------
+
+  private def methodLevelBFS(
+    classByName: Map[String, ClassNode],
+    entryPoints: Set[String]
+  ): Set[String] = {
     // Build subclass map for virtual dispatch resolution
     val subclasses = mutable.Map.empty[String, mutable.Set[String]]
-    for (cn <- classNodes) {
+    for ((_, cn) <- classByName) {
       if (cn.superName != null)
         subclasses.getOrElseUpdate(cn.superName, mutable.Set.empty) += cn.name
       if (cn.interfaces != null)
@@ -48,7 +63,7 @@ object ReachabilityAnalysis {
     }
 
     val reachableClasses = mutable.Set.empty[String]
-    val reachableMethods = mutable.Set.empty[(String, String, String)] // (class, name, desc)
+    val reachableMethods = mutable.Set.empty[(String, String, String)]
     val classWorklist = mutable.Queue.empty[String]
     val methodWorklist = mutable.Queue.empty[(String, String, String)]
 
@@ -62,104 +77,256 @@ object ReachabilityAnalysis {
     def enqueueMethod(owner: String, name: String, desc: String): Unit = {
       val key = (owner, name, desc)
       if (!reachableMethods.contains(key)) {
-        // Only enqueue if the method actually exists in this class
         classByName.get(owner) match {
           case Some(cn) if cn.methods != null && cn.methods.asScala.exists(m => m.name == name && m.desc == desc) =>
             reachableMethods += key
             methodWorklist += key
             enqueueClass(owner)
-          case _ => // method not found in this class, skip
+          case _ =>
         }
       }
     }
 
-    // When a virtual/interface call targets (owner, name, desc), we need to also mark
-    // overrides in reachable subclasses, AND mark overrides in subclasses that become
-    // reachable later. Track virtual call targets for this purpose.
+    /** Resolve a method call by walking up the hierarchy from `owner`. */
+    def resolveAndEnqueueMethod(owner: String, name: String, desc: String): Unit = {
+      classByName.get(owner) match {
+        case Some(cn) if cn.methods != null && cn.methods.asScala.exists(m => m.name == name && m.desc == desc) =>
+          enqueueMethod(owner, name, desc)
+        case Some(cn) =>
+          resolveMethodUp(cn, name, desc)
+          enqueueClass(owner)
+        case None =>
+      }
+    }
+
+    def resolveMethodUp(cn: ClassNode, name: String, desc: String): Boolean = {
+      var found = false
+      if (!found && cn.superName != null) found = resolveInClass(cn.superName, name, desc)
+      if (!found && cn.interfaces != null) {
+        val it = cn.interfaces.iterator()
+        while (it.hasNext && !found) found = resolveInClass(it.next(), name, desc)
+      }
+      found
+    }
+
+    def resolveInClass(className: String, name: String, desc: String): Boolean = {
+      classByName.get(className) match {
+        case Some(cn) =>
+          if (cn.methods != null && cn.methods.asScala.exists(m => m.name == name && m.desc == desc)) {
+            enqueueMethod(className, name, desc)
+            true
+          } else resolveMethodUp(cn, name, desc)
+        case None => false
+      }
+    }
+
     val virtualCallTargets = mutable.Set.empty[(String, String, String)]
 
     def enqueueVirtualCall(owner: String, name: String, desc: String): Unit = {
       virtualCallTargets += ((owner, name, desc))
-      // Mark the method in the declared class (if it exists)
-      enqueueMethod(owner, name, desc)
-      // Mark overrides in all currently-reachable subclasses
+      resolveAndEnqueueMethod(owner, name, desc)
       enqueueOverridesInSubclasses(owner, name, desc)
     }
 
     def enqueueOverridesInSubclasses(owner: String, name: String, desc: String): Unit = {
-      val subs = subclasses.getOrElse(owner, mutable.Set.empty)
-      for (sub <- subs) {
-        // If this subclass is reachable, check for override
-        if (reachableClasses.contains(sub)) {
+      for (sub <- subclasses.getOrElse(owner, mutable.Set.empty)) {
+        if (reachableClasses.contains(sub))
           enqueueMethod(sub, name, desc)
-        }
-        // Continue recursively through sub-subclasses
         enqueueOverridesInSubclasses(sub, name, desc)
       }
     }
 
     // Seed: all methods in entry point classes
-    for (ep <- entryPoints) {
-      classByName.get(ep).foreach { cn =>
-        enqueueClass(ep)
-        if (cn.methods != null)
-          cn.methods.asScala.foreach(mn => enqueueMethod(ep, mn.name, mn.desc))
-      }
+    for (ep <- entryPoints; cn <- classByName.get(ep)) {
+      enqueueClass(ep)
+      if (cn.methods != null)
+        cn.methods.asScala.foreach(mn => enqueueMethod(ep, mn.name, mn.desc))
     }
 
     // Main BFS loop
     while (classWorklist.nonEmpty || methodWorklist.nonEmpty) {
-      // Process newly reachable classes
       while (classWorklist.nonEmpty) {
         val className = classWorklist.dequeue()
-        classByName.get(className).foreach { cn =>
-          // Superclass and interfaces always reachable
+        for (cn <- classByName.get(className)) {
           if (cn.superName != null) enqueueClass(cn.superName)
           if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueueClass)
 
-          // <clinit> is always reachable when a class is reached
-          if (cn.methods != null) {
-            cn.methods.asScala
-              .filter(mn => mn.name == "<clinit>")
+          if (cn.methods != null)
+            cn.methods.asScala.filter(_.name == "<clinit>")
               .foreach(mn => enqueueMethod(className, mn.name, mn.desc))
-          }
 
-          // Field types: field declarations make types reachable (for field access resolution)
-          if (cn.fields != null) {
-            cn.fields.asScala.foreach { fn =>
-              addTypeDescClassRefs(fn.desc, enqueueClass)
-            }
-          }
+          if (cn.fields != null)
+            cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueueClass))
 
-          // Class-level annotations
           addAnnotationClassRefs(cn.visibleAnnotations, enqueueClass)
           addAnnotationClassRefs(cn.invisibleAnnotations, enqueueClass)
 
-          // If this newly-reachable class overrides any virtual call target, mark the override
-          for ((targetOwner, name, desc) <- virtualCallTargets) {
+          for ((targetOwner, name, desc) <- virtualCallTargets)
             if (isSubclassOf(className, targetOwner, classByName))
               enqueueMethod(className, name, desc)
-          }
         }
       }
 
-      // Process reachable methods
       while (methodWorklist.nonEmpty) {
         val (className, methodName, methodDesc) = methodWorklist.dequeue()
-        classByName.get(className).foreach { cn =>
-          cn.methods.asScala
-            .find(mn => mn.name == methodName && mn.desc == methodDesc)
-            .foreach { mn =>
-              processMethodRefs(mn, className, enqueueClass, enqueueMethod, enqueueVirtualCall)
-            }
-        }
+        for (cn <- classByName.get(className);
+             mn <- cn.methods.asScala.find(m => m.name == methodName && m.desc == methodDesc))
+          processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall)
       }
     }
 
     reachableClasses.toSet
   }
 
-  /** Check if `child` is a (transitive) subclass/subinterface of `parent`. */
+  // ---------------------------------------------------------------------------
+  // Phase 2: Load closure
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Ensure all classes referenced by execution-reachable classes are also included.
+   * These "load-reachable" classes are needed for JVM class loading/verification.
+   * For load-reachable classes, we follow their type hierarchy and descriptor types
+   * but NOT their method bodies.
+   */
+  private def loadClosure(execReachable: Set[String], classByName: Map[String, ClassNode]): Set[String] = {
+    val allReachable = mutable.Set.empty[String]
+    allReachable ++= execReachable
+
+    val worklist = mutable.Queue.empty[String]
+
+    // Seed: collect all class references from execution-reachable classes
+    for (name <- execReachable; cn <- classByName.get(name))
+      collectAllClassRefs(cn, allReachable, worklist, classByName)
+
+    // Transitively close: load-reachable classes need their supertypes,
+    // field types, and method descriptor types to also be loadable
+    while (worklist.nonEmpty) {
+      val name = worklist.dequeue()
+      for (cn <- classByName.get(name))
+        collectLoadDeps(cn, allReachable, worklist, classByName)
+    }
+
+    allReachable.toSet
+  }
+
+  /** Collect ALL class references from a ClassNode (method bodies included). */
+  private def collectAllClassRefs(
+    cn: ClassNode,
+    reachable: mutable.Set[String],
+    worklist: mutable.Queue[String],
+    classByName: Map[String, ClassNode],
+  ): Unit = {
+    def enqueue(name: String): Unit = {
+      if (!reachable.contains(name) && classByName.contains(name)) {
+        reachable += name
+        worklist += name
+      }
+    }
+
+    if (cn.superName != null) enqueue(cn.superName)
+    if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
+
+    if (cn.fields != null)
+      cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueue))
+
+    if (cn.methods != null) {
+      cn.methods.asScala.foreach { mn =>
+        addMethodDescClassRefs(mn.desc, enqueue)
+        if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueue)
+        collectInstructionClassRefs(mn, enqueue)
+        if (mn.tryCatchBlocks != null)
+          mn.tryCatchBlocks.asScala.foreach(tcb => if (tcb.`type` != null) enqueue(tcb.`type`))
+      }
+    }
+
+    addAnnotationClassRefs(cn.visibleAnnotations, enqueue)
+    addAnnotationClassRefs(cn.invisibleAnnotations, enqueue)
+  }
+
+  /** Collect class references that are needed for a class to be LOADABLE (not executable). */
+  private def collectLoadDeps(
+    cn: ClassNode,
+    reachable: mutable.Set[String],
+    worklist: mutable.Queue[String],
+    classByName: Map[String, ClassNode],
+  ): Unit = {
+    def enqueue(name: String): Unit = {
+      if (!reachable.contains(name) && classByName.contains(name)) {
+        reachable += name
+        worklist += name
+      }
+    }
+
+    // Supertypes
+    if (cn.superName != null) enqueue(cn.superName)
+    if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
+
+    // Field types
+    if (cn.fields != null)
+      cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueue))
+
+    // Method descriptor types (parameter + return types for ALL methods)
+    if (cn.methods != null)
+      cn.methods.asScala.foreach(mn => addMethodDescClassRefs(mn.desc, enqueue))
+
+    // Annotations
+    addAnnotationClassRefs(cn.visibleAnnotations, enqueue)
+    addAnnotationClassRefs(cn.invisibleAnnotations, enqueue)
+  }
+
+  /** Collect class references from instruction nodes. */
+  private def collectInstructionClassRefs(mn: MethodNode, enqueue: String => Unit): Unit = {
+    if (mn.instructions == null) return
+    val iter = mn.instructions.iterator()
+    while (iter.hasNext) {
+      iter.next() match {
+        case mi: MethodInsnNode =>
+          enqueue(mi.owner)
+          addMethodDescClassRefs(mi.desc, enqueue)
+        case fi: FieldInsnNode =>
+          enqueue(fi.owner)
+          addTypeDescClassRefs(fi.desc, enqueue)
+        case ti: TypeInsnNode =>
+          addInternalOrArrayClassRef(ti.desc, enqueue)
+        case mri: MultiANewArrayInsnNode =>
+          addTypeDescClassRefs(mri.desc, enqueue)
+        case ldc: LdcInsnNode =>
+          ldc.cst match {
+            case t: Type =>
+              if (t.getSort == Type.OBJECT) enqueue(t.getInternalName)
+              else if (t.getSort == Type.ARRAY) addTypeDescClassRefs(t.getDescriptor, enqueue)
+              else if (t.getSort == Type.METHOD) addMethodDescClassRefs(t.getDescriptor, enqueue)
+            case h: Handle =>
+              enqueue(h.getOwner)
+              addMethodDescClassRefs(h.getDesc, enqueue)
+            case _ =>
+          }
+        case inv: InvokeDynamicInsnNode =>
+          addMethodDescClassRefs(inv.desc, enqueue)
+          if (inv.bsm != null) {
+            enqueue(inv.bsm.getOwner)
+            addMethodDescClassRefs(inv.bsm.getDesc, enqueue)
+          }
+          if (inv.bsmArgs != null) {
+            for (arg <- inv.bsmArgs) arg match {
+              case t: Type =>
+                if (t.getSort == Type.OBJECT) enqueue(t.getInternalName)
+                else if (t.getSort == Type.METHOD) addMethodDescClassRefs(t.getDescriptor, enqueue)
+              case h: Handle =>
+                enqueue(h.getOwner)
+                addMethodDescClassRefs(h.getDesc, enqueue)
+              case _ =>
+            }
+          }
+        case _ =>
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
   private def isSubclassOf(child: String, parent: String, classByName: Map[String, ClassNode]): Boolean = {
     if (child == parent) return true
     classByName.get(child) match {
@@ -170,21 +337,15 @@ object ReachabilityAnalysis {
     }
   }
 
-  /** Process all references within a method body. */
   private def processMethodRefs(
     mn: MethodNode,
-    owner: String,
     enqueueClass: String => Unit,
-    enqueueMethod: (String, String, String) => Unit,
+    resolveAndEnqueueMethod: (String, String, String) => Unit,
     enqueueVirtualCall: (String, String, String) => Unit,
   ): Unit = {
-    // Method descriptor: parameter and return types
     addMethodDescClassRefs(mn.desc, enqueueClass)
-
-    // Exception types in throws clause
     if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueueClass)
 
-    // Instructions
     if (mn.instructions != null) {
       val iter = mn.instructions.iterator()
       while (iter.hasNext) {
@@ -193,26 +354,19 @@ object ReachabilityAnalysis {
             enqueueClass(mi.owner)
             addMethodDescClassRefs(mi.desc, enqueueClass)
             mi.getOpcode match {
-              case Opcodes.INVOKESTATIC =>
-                enqueueMethod(mi.owner, mi.name, mi.desc)
-              case Opcodes.INVOKESPECIAL =>
-                // Constructor or super call — resolve directly
-                enqueueMethod(mi.owner, mi.name, mi.desc)
+              case Opcodes.INVOKESTATIC | Opcodes.INVOKESPECIAL =>
+                resolveAndEnqueueMethod(mi.owner, mi.name, mi.desc)
               case Opcodes.INVOKEVIRTUAL | Opcodes.INVOKEINTERFACE =>
                 enqueueVirtualCall(mi.owner, mi.name, mi.desc)
               case _ =>
             }
-
           case fi: FieldInsnNode =>
             enqueueClass(fi.owner)
             addTypeDescClassRefs(fi.desc, enqueueClass)
-
           case ti: TypeInsnNode =>
             addInternalOrArrayClassRef(ti.desc, enqueueClass)
-
           case mri: MultiANewArrayInsnNode =>
             addTypeDescClassRefs(mri.desc, enqueueClass)
-
           case ldc: LdcInsnNode =>
             ldc.cst match {
               case t: Type =>
@@ -222,17 +376,15 @@ object ReachabilityAnalysis {
               case h: Handle =>
                 enqueueClass(h.getOwner)
                 addMethodDescClassRefs(h.getDesc, enqueueClass)
-                // Handle refs point to actual method implementations
-                enqueueMethod(h.getOwner, h.getName, h.getDesc)
-              case _ => // primitives, strings
+                resolveAndEnqueueMethod(h.getOwner, h.getName, h.getDesc)
+              case _ =>
             }
-
           case inv: InvokeDynamicInsnNode =>
             addMethodDescClassRefs(inv.desc, enqueueClass)
             if (inv.bsm != null) {
               enqueueClass(inv.bsm.getOwner)
               addMethodDescClassRefs(inv.bsm.getDesc, enqueueClass)
-              enqueueMethod(inv.bsm.getOwner, inv.bsm.getName, inv.bsm.getDesc)
+              resolveAndEnqueueMethod(inv.bsm.getOwner, inv.bsm.getName, inv.bsm.getDesc)
             }
             if (inv.bsmArgs != null) {
               for (arg <- inv.bsmArgs) arg match {
@@ -242,25 +394,19 @@ object ReachabilityAnalysis {
                 case h: Handle =>
                   enqueueClass(h.getOwner)
                   addMethodDescClassRefs(h.getDesc, enqueueClass)
-                  enqueueMethod(h.getOwner, h.getName, h.getDesc)
+                  resolveAndEnqueueMethod(h.getOwner, h.getName, h.getDesc)
                 case _ =>
               }
             }
-
           case _ =>
         }
       }
     }
 
-    // Try-catch handler types
-    if (mn.tryCatchBlocks != null) {
-      mn.tryCatchBlocks.asScala.foreach { tcb =>
-        if (tcb.`type` != null) enqueueClass(tcb.`type`)
-      }
-    }
+    if (mn.tryCatchBlocks != null)
+      mn.tryCatchBlocks.asScala.foreach(tcb => if (tcb.`type` != null) enqueueClass(tcb.`type`))
   }
 
-  /** Add class refs from a type descriptor (e.g. "Ljava/lang/String;", "[I", "I") */
   private def addTypeDescClassRefs(desc: String, enqueue: String => Unit): Unit = {
     if (desc == null || desc.isEmpty) return
     var i = 0
@@ -268,17 +414,14 @@ object ReachabilityAnalysis {
       desc.charAt(i) match {
         case 'L' =>
           val end = desc.indexOf(';', i)
-          if (end > i) {
-            enqueue(desc.substring(i + 1, end))
-            i = end + 1
-          } else return
+          if (end > i) { enqueue(desc.substring(i + 1, end)); i = end + 1 }
+          else return
         case '[' => i += 1
         case _ => return
       }
     }
   }
 
-  /** Add class refs from a method descriptor */
   private def addMethodDescClassRefs(desc: String, enqueue: String => Unit): Unit = {
     if (desc == null) return
     try {
@@ -290,9 +433,7 @@ object ReachabilityAnalysis {
       val rt = mt.getReturnType
       if (rt.getSort == Type.OBJECT) enqueue(rt.getInternalName)
       else if (rt.getSort == Type.ARRAY) addTypeFromAsmType(rt.getElementType, enqueue)
-    } catch {
-      case _: Exception => // malformed descriptor, skip
-    }
+    } catch { case _: Exception => }
   }
 
   private def addTypeFromAsmType(t: Type, enqueue: String => Unit): Unit = {
@@ -300,17 +441,13 @@ object ReachabilityAnalysis {
     else if (t.getSort == Type.ARRAY) addTypeFromAsmType(t.getElementType, enqueue)
   }
 
-  /** Handle TypeInsnNode operands which may be internal names or array descriptors */
   private def addInternalOrArrayClassRef(desc: String, enqueue: String => Unit): Unit = {
     if (desc.startsWith("[")) addTypeDescClassRefs(desc, enqueue)
     else enqueue(desc)
   }
 
-  /** Add class refs from annotations */
   private def addAnnotationClassRefs(annotations: java.util.List[AnnotationNode], enqueue: String => Unit): Unit = {
     if (annotations == null) return
-    annotations.asScala.foreach { an =>
-      addTypeDescClassRefs(an.desc, enqueue)
-    }
+    annotations.asScala.foreach(an => addTypeDescClassRefs(an.desc, enqueue))
   }
 }
