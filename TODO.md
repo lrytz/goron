@@ -13,4 +13,5 @@
   - Remove `ClearableJConcurrentHashMap` (unused)
   - Clean up stale comments referencing GenBCode, PostProcessorFrontendAccess, compiler symbols
 - [ ] Set up scalafmt
+- [ ] Better handling of Java module system accessibility restrictions (currently `optInlineFrom` excludes JDK internal packages as a crude workaround; need proper module-aware visibility checks for Java dependencies)
 - [ ] Make closed-world analysis update InlineInfo so the inliner can exploit effectively-final methods on Scala classes (currently only sets ACC_FINAL, which the inliner ignores in favor of ScalaInlineInfo's effectivelyFinal)
