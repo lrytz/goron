@@ -13,9 +13,8 @@ import scala.tools.asm.Opcodes
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
 
-/** Integration tests that run the full goron pipeline over user classes + scala-library.
-  * These test whole-program properties: DCE, inlining with real library classes, and
-  * closed-world optimizations.
+/** Integration tests that run the full goron pipeline over user classes + scala-library. These test whole-program
+  * properties: DCE, inlining with real library classes, and closed-world optimizations.
   */
 class IntegrationTest extends GoronTesting {
 
@@ -24,7 +23,7 @@ class IntegrationTest extends GoronTesting {
     optClosureInvocations = true,
     optLocalOptimizations = true,
     eliminateDeadCode = true,
-    closedWorld = true,
+    closedWorld = true
   )
 
   // --- DCE tests ---
@@ -95,8 +94,10 @@ class IntegrationTest extends GoronTesting {
     val scalaLibCount = names.count(_.startsWith("scala/"))
     val totalLibClasses = goron.testkit.GoronTesting.scalaLibraryNodes.size
     // Method-level DCE: a println app should keep only a small fraction of scala-library
-    assert(scalaLibCount < 200,
-      s"Expected <200 scala-library classes for println app, but kept $scalaLibCount of $totalLibClasses")
+    assert(
+      scalaLibCount < 200,
+      s"Expected <200 scala-library classes for println app, but kept $scalaLibCount of $totalLibClasses"
+    )
     assertEquals(runMain(survivors), "hello")
   }
 
@@ -156,8 +157,10 @@ class IntegrationTest extends GoronTesting {
     val onlyImpl = findClass(survivors, "OnlyImpl")
     val computeMethod = getAsmMethod(onlyImpl, "compute")
     // In closed-world, OnlyImpl has no subclasses, so compute should be marked ACC_FINAL
-    assert((computeMethod.access & Opcodes.ACC_FINAL) != 0,
-      s"Expected compute to be marked ACC_FINAL in closed-world mode")
+    assert(
+      (computeMethod.access & Opcodes.ACC_FINAL) != 0,
+      s"Expected compute to be marked ACC_FINAL in closed-world mode"
+    )
     assertEquals(runMain(survivors), "42")
   }
 
@@ -224,8 +227,10 @@ class IntegrationTest extends GoronTesting {
     val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val names = survivingClassNames(survivors)
     assert(names.contains("Helper"), s"Helper should survive: $names")
-    assert(!names.contains("OnlyUsedByUnused"),
-      s"OnlyUsedByUnused should be eliminated (only referenced from stripped method): $names")
+    assert(
+      !names.contains("OnlyUsedByUnused"),
+      s"OnlyUsedByUnused should be eliminated (only referenced from stripped method): $names"
+    )
     assertEquals(runMain(survivors), "42")
   }
 
@@ -245,8 +250,10 @@ class IntegrationTest extends GoronTesting {
     // The cause chain is typically NoClassDefFoundError -> ClassNotFoundException
     def hasCause(t: Throwable, cls: Class[_]): Boolean =
       t != null && (cls.isInstance(t) || hasCause(t.getCause, cls))
-    assert(hasCause(e, classOf[ClassNotFoundException]),
-      s"Expected ClassNotFoundException in cause chain, got: ${e.getCause}")
+    assert(
+      hasCause(e, classOf[ClassNotFoundException]),
+      s"Expected ClassNotFoundException in cause chain, got: ${e.getCause}"
+    )
   }
 
   test("for-comprehension over Range prints correctly") {

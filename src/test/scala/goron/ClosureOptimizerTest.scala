@@ -12,14 +12,13 @@ import scala.tools.asm.Opcodes._
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
 
-/** Tests for closure invocation optimization.
-  * Adapted from scala.tools.nsc.backend.jvm.opt.ClosureOptimizerTest.
+/** Tests for closure invocation optimization. Adapted from scala.tools.nsc.backend.jvm.opt.ClosureOptimizerTest.
   */
 class ClosureOptimizerTest extends GoronTesting {
   override def goronConfig = super.goronConfig.copy(
     optInlinerEnabled = true,
     optClosureInvocations = true,
-    optLocalOptimizations = true,
+    optLocalOptimizations = true
   )
 
   test("nothing-typed closure body") {
@@ -31,7 +30,10 @@ class ClosureOptimizerTest extends GoronTesting {
         |}
       """.stripMargin
     val c = compileAndOptimizeClass(code)
-    assertSameSummary(getMethod(c, "t"), List(ALOAD, "isEmpty", IFEQ /*12*/, NEW, DUP, LDC, "<init>", ATHROW, -1 /*12*/, ALOAD, ARETURN))
+    assertSameSummary(
+      getMethod(c, "t"),
+      List(ALOAD, "isEmpty", IFEQ /*12*/, NEW, DUP, LDC, "<init>", ATHROW, -1 /*12*/, ALOAD, ARETURN)
+    )
   }
 
   test("null-typed closure body") {
@@ -43,7 +45,10 @@ class ClosureOptimizerTest extends GoronTesting {
         |}
       """.stripMargin
     val c = compileAndOptimizeClass(code)
-    assertSameSummary(getMethod(c, "t"), List(ALOAD, "isEmpty", IFEQ /*9*/, ACONST_NULL, GOTO /*12*/, -1 /*9*/, ALOAD, -1 /*12*/, CHECKCAST, ARETURN))
+    assertSameSummary(
+      getMethod(c, "t"),
+      List(ALOAD, "isEmpty", IFEQ /*9*/, ACONST_NULL, GOTO /*12*/, -1 /*9*/, ALOAD, -1 /*12*/, CHECKCAST, ARETURN)
+    )
   }
 
   test("make LMF cast explicit") {
@@ -56,9 +61,15 @@ class ClosureOptimizerTest extends GoronTesting {
         |}
       """.stripMargin
     val c = compileAndOptimizeClass(code)
-    assertSameCode(getMethod(c, "t"),
-      List(VarOp(ALOAD, 1), InvokeVirtual("scala/collection/immutable/List", "head", "()Ljava/lang/Object;"),
-        TypeOp(CHECKCAST, "java/lang/String"), Op(ARETURN)))
+    assertSameCode(
+      getMethod(c, "t"),
+      List(
+        VarOp(ALOAD, 1),
+        InvokeVirtual("scala/collection/immutable/List", "head", "()Ljava/lang/Object;"),
+        TypeOp(CHECKCAST, "java/lang/String"),
+        Op(ARETURN)
+      )
+    )
   }
 
   test("closure opt with unreachable code") {

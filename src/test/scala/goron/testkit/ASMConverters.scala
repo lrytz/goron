@@ -10,9 +10,8 @@ package goron.testkit
 import scala.jdk.CollectionConverters._
 import scala.tools.asm, asm.{tree => t}, asm.Opcodes._
 
-/** Wraps ASM instructions in case classes so that equals and toString work
-  * for the purpose of bytecode diffing and pretty printing.
-  * Adapted from scala.tools.testkit.ASMConverters.
+/** Wraps ASM instructions in case classes so that equals and toString work for the purpose of bytecode diffing and
+  * pretty printing. Adapted from scala.tools.testkit.ASMConverters.
   */
 object ASMConverters {
 
@@ -21,7 +20,7 @@ object ASMConverters {
   def convertMethod(meth: t.MethodNode): Method = new AsmToScala(meth).method
 
   implicit class RichInstructionLists(val self: List[Instruction]) extends AnyVal {
-    def === (other: List[Instruction]) = equivalentBytecode(self, other)
+    def ===(other: List[Instruction]) = equivalentBytecode(self, other)
 
     def dropLinesFrames = self.filterNot(i => i.isInstanceOf[LineNumber] || i.isInstanceOf[FrameEntry])
 
@@ -30,7 +29,7 @@ object ASMConverters {
       case LookupSwitch(op, dflt, keys, labels)    => (dflt :: labels).toSet
       case TableSwitch(op, min, max, dflt, labels) => (dflt :: labels).toSet
       case LineNumber(line, start)                 => Set(start)
-      case _ => Set.empty
+      case _                                       => Set.empty
     }
 
     def dropStaleLabels = {
@@ -43,19 +42,21 @@ object ASMConverters {
 
     def summary: List[Any] = dropNonOp map {
       case i: Invoke => i.name
-      case i => i.opcode
+      case i         => i.opcode
     }
 
     def summaryText: String = {
       def comment(i: Instruction) = i match {
-        case j: Jump => s" /*${j.label.offset}*/"
+        case j: Jump  => s" /*${j.label.offset}*/"
         case l: Label => s" /*${l.offset}*/"
-        case _ => ""
+        case _        => ""
       }
-      dropNonOp.map({
-        case i: Invoke => s""""${i.name}""""
-        case ins => opcodeToString(ins.opcode, ins.opcode) + comment(ins)
-      }).mkString("List(", ", ", ")")
+      dropNonOp
+        .map({
+          case i: Invoke => s""""${i.name}""""
+          case ins       => opcodeToString(ins.opcode, ins.opcode) + comment(ins)
+        })
+        .mkString("List(", ", ", ")")
     }
   }
 
@@ -71,7 +72,7 @@ object ASMConverters {
       val printOpcode = opcode != -1
       def q(a: Any) = a match {
         case s: String => s""""$s""""
-        case _ => a.toString
+        case _         => a.toString
       }
       productPrefix + (
         if (printOpcode) Iterator(opcodeToString(opcode)) ++ productIterator.drop(1).map(q)
@@ -82,22 +83,23 @@ object ASMConverters {
 
   case class Method(instructions: List[Instruction], handlers: List[ExceptionHandler], localVars: List[LocalVariable])
 
-  case class Field        (opcode: Int, owner: String, name: String, desc: String)                            extends Instruction
-  case class Incr         (opcode: Int, `var`: Int, incr: Int)                                                extends Instruction
-  case class Op           (opcode: Int)                                                                       extends Instruction
-  case class IntOp        (opcode: Int, operand: Int)                                                         extends Instruction
-  case class Jump         (opcode: Int, label: Label)                                                         extends Instruction
-  case class Ldc          (opcode: Int, cst: Any)                                                             extends Instruction
-  case class LookupSwitch (opcode: Int, dflt: Label, keys: List[Int], labels: List[Label])                    extends Instruction
-  case class TableSwitch  (opcode: Int, min: Int, max: Int, dflt: Label, labels: List[Label])                 extends Instruction
-  case class Invoke       (opcode: Int, owner: String, name: String, desc: String, itf: Boolean)              extends Instruction
-  case class InvokeDynamic(opcode: Int, name: String, desc: String, bsm: MethodHandle, bsmArgs: List[AnyRef]) extends Instruction
-  case class NewArray     (opcode: Int, desc: String, dims: Int)                                              extends Instruction
-  case class TypeOp       (opcode: Int, desc: String)                                                         extends Instruction
-  case class VarOp        (opcode: Int, `var`: Int)                                                           extends Instruction
-  case class Label        (offset: Int)                                                                       extends Instruction { def opcode: Int = -1 }
-  case class FrameEntry   (`type`: Int, local: List[Any], stack: List[Any])                                   extends Instruction { def opcode: Int = -1 }
-  case class LineNumber   (line: Int, start: Label)                                                           extends Instruction { def opcode: Int = -1 }
+  case class Field(opcode: Int, owner: String, name: String, desc: String) extends Instruction
+  case class Incr(opcode: Int, `var`: Int, incr: Int) extends Instruction
+  case class Op(opcode: Int) extends Instruction
+  case class IntOp(opcode: Int, operand: Int) extends Instruction
+  case class Jump(opcode: Int, label: Label) extends Instruction
+  case class Ldc(opcode: Int, cst: Any) extends Instruction
+  case class LookupSwitch(opcode: Int, dflt: Label, keys: List[Int], labels: List[Label]) extends Instruction
+  case class TableSwitch(opcode: Int, min: Int, max: Int, dflt: Label, labels: List[Label]) extends Instruction
+  case class Invoke(opcode: Int, owner: String, name: String, desc: String, itf: Boolean) extends Instruction
+  case class InvokeDynamic(opcode: Int, name: String, desc: String, bsm: MethodHandle, bsmArgs: List[AnyRef])
+      extends Instruction
+  case class NewArray(opcode: Int, desc: String, dims: Int) extends Instruction
+  case class TypeOp(opcode: Int, desc: String) extends Instruction
+  case class VarOp(opcode: Int, `var`: Int) extends Instruction
+  case class Label(offset: Int) extends Instruction { def opcode: Int = -1 }
+  case class FrameEntry(`type`: Int, local: List[Any], stack: List[Any]) extends Instruction { def opcode: Int = -1 }
+  case class LineNumber(line: Int, start: Label) extends Instruction { def opcode: Int = -1 }
 
   case class MethodHandle(tag: Int, owner: String, name: String, desc: String, itf: Boolean)
 
@@ -118,50 +120,65 @@ object ASMConverters {
 
     private def mapOverFrameTypes(is: List[Any]): List[Any] = is map {
       case i: t.LabelNode => applyLabel(i)
-      case x => x
+      case x              => x
     }
 
     private def applyLabel(l: t.LabelNode) = this(l: t.AbstractInsnNode).asInstanceOf[Label]
 
     private def apply(x: t.AbstractInsnNode): Instruction = x match {
-      case i: t.FieldInsnNode          => Field        (op(i), i.owner, i.name, i.desc)
-      case i: t.IincInsnNode           => Incr         (op(i), i.`var`, i.incr)
-      case i: t.InsnNode               => Op           (op(i))
-      case i: t.IntInsnNode            => IntOp        (op(i), i.operand)
-      case i: t.JumpInsnNode           => Jump         (op(i), applyLabel(i.label))
-      case i: t.LdcInsnNode            => Ldc          (op(i), i.cst: Any)
-      case i: t.LookupSwitchInsnNode   => LookupSwitch (op(i), applyLabel(i.dflt), lst(i.keys) map (x => x: Int), lst(i.labels) map applyLabel)
-      case i: t.TableSwitchInsnNode    => TableSwitch  (op(i), i.min, i.max, applyLabel(i.dflt), lst(i.labels) map applyLabel)
-      case i: t.MethodInsnNode         => Invoke       (op(i), i.owner, i.name, i.desc, i.itf)
-      case i: t.InvokeDynamicInsnNode  => InvokeDynamic(op(i), i.name, i.desc, convertMethodHandle(i.bsm), convertBsmArgs(i.bsmArgs))
-      case i: t.MultiANewArrayInsnNode => NewArray     (op(i), i.desc, i.dims)
-      case i: t.TypeInsnNode           => TypeOp       (op(i), i.desc)
-      case i: t.VarInsnNode            => VarOp        (op(i), i.`var`)
-      case i: t.LabelNode              => Label        (labelIndex(i))
-      case i: t.FrameNode              => FrameEntry   (i.`type`, mapOverFrameTypes(lst(i.local)), mapOverFrameTypes(lst(i.stack)))
-      case i: t.LineNumberNode         => LineNumber   (i.line, applyLabel(i.start))
-      case i                           => throw new MatchError(x)
+      case i: t.FieldInsnNode        => Field(op(i), i.owner, i.name, i.desc)
+      case i: t.IincInsnNode         => Incr(op(i), i.`var`, i.incr)
+      case i: t.InsnNode             => Op(op(i))
+      case i: t.IntInsnNode          => IntOp(op(i), i.operand)
+      case i: t.JumpInsnNode         => Jump(op(i), applyLabel(i.label))
+      case i: t.LdcInsnNode          => Ldc(op(i), i.cst: Any)
+      case i: t.LookupSwitchInsnNode =>
+        LookupSwitch(op(i), applyLabel(i.dflt), lst(i.keys) map (x => x: Int), lst(i.labels) map applyLabel)
+      case i: t.TableSwitchInsnNode =>
+        TableSwitch(op(i), i.min, i.max, applyLabel(i.dflt), lst(i.labels) map applyLabel)
+      case i: t.MethodInsnNode        => Invoke(op(i), i.owner, i.name, i.desc, i.itf)
+      case i: t.InvokeDynamicInsnNode =>
+        InvokeDynamic(op(i), i.name, i.desc, convertMethodHandle(i.bsm), convertBsmArgs(i.bsmArgs))
+      case i: t.MultiANewArrayInsnNode => NewArray(op(i), i.desc, i.dims)
+      case i: t.TypeInsnNode           => TypeOp(op(i), i.desc)
+      case i: t.VarInsnNode            => VarOp(op(i), i.`var`)
+      case i: t.LabelNode              => Label(labelIndex(i))
+      case i: t.FrameNode      => FrameEntry(i.`type`, mapOverFrameTypes(lst(i.local)), mapOverFrameTypes(lst(i.stack)))
+      case i: t.LineNumberNode => LineNumber(i.line, applyLabel(i.start))
+      case i                   => throw new MatchError(x)
     }
 
-    private def convertBsmArgs(a: Array[Object]): List[Object] = a.iterator.map({
-      case h: asm.Handle => convertMethodHandle(h)
-      case _ => a
-    }).toList
+    private def convertBsmArgs(a: Array[Object]): List[Object] = a.iterator
+      .map({
+        case h: asm.Handle => convertMethodHandle(h)
+        case _             => a
+      })
+      .toList
 
-    private def convertMethodHandle(h: asm.Handle): MethodHandle = MethodHandle(h.getTag, h.getOwner, h.getName, h.getDesc, h.isInterface)
+    private def convertMethodHandle(h: asm.Handle): MethodHandle =
+      MethodHandle(h.getTag, h.getOwner, h.getName, h.getDesc, h.isInterface)
 
     private def convertHandlers(method: t.MethodNode): List[ExceptionHandler] = {
-      method.tryCatchBlocks.iterator.asScala.map(h => ExceptionHandler(applyLabel(h.start), applyLabel(h.end), applyLabel(h.handler), Option(h.`type`))).toList
+      method.tryCatchBlocks.iterator.asScala
+        .map(h => ExceptionHandler(applyLabel(h.start), applyLabel(h.end), applyLabel(h.handler), Option(h.`type`)))
+        .toList
     }
 
     private def convertLocalVars(method: t.MethodNode): List[LocalVariable] = {
-      method.localVariables.iterator.asScala.map(v => LocalVariable(v.name, v.desc, Option(v.signature), applyLabel(v.start), applyLabel(v.end), v.index)).toList
+      method.localVariables.iterator.asScala
+        .map(v => LocalVariable(v.name, v.desc, Option(v.signature), applyLabel(v.start), applyLabel(v.end), v.index))
+        .toList
     }
   }
 
   import collection.mutable.{Map => MMap}
 
-  def equivalentBytecode(as: List[Instruction], bs: List[Instruction], varMap: MMap[Int, Int] = MMap(), labelMap: MMap[Int, Int] = MMap()): Boolean = {
+  def equivalentBytecode(
+      as: List[Instruction],
+      bs: List[Instruction],
+      varMap: MMap[Int, Int] = MMap(),
+      labelMap: MMap[Int, Int] = MMap()
+  ): Boolean = {
     def same(v1: Int, v2: Int, m: MMap[Int, Int]) = {
       if (m contains v1) m(v1) == v2
       else if (m.valuesIterator contains v2) false
@@ -173,26 +190,30 @@ object ASMConverters {
 
     def sameFrameTypes(ts1: List[Any], ts2: List[Any]) = (ts1 corresponds ts2) {
       case (t1: Label, t2: Label) => sameLabel(t1, t2)
-      case (x, y) => x == y
+      case (x, y)                 => x == y
     }
 
     if (as.isEmpty) bs.isEmpty
     else if (bs.isEmpty) false
-    else ((as.head, bs.head) match {
-      case (VarOp(op1, v1), VarOp(op2, v2))           => op1 == op2 && sameVar(v1, v2)
-      case (Incr(op1, v1, inc1), Incr(op2, v2, inc2)) => op1 == op2 && sameVar(v1, v2) && inc1 == inc2
+    else
+      ((as.head, bs.head) match {
+        case (VarOp(op1, v1), VarOp(op2, v2))           => op1 == op2 && sameVar(v1, v2)
+        case (Incr(op1, v1, inc1), Incr(op2, v2, inc2)) => op1 == op2 && sameVar(v1, v2) && inc1 == inc2
 
-      case (l1 @ Label(_), l2 @ Label(_))                                                 => sameLabel(l1, l2)
-      case (Jump(op1, l1), Jump(op2, l2))                                                 => op1 == op2 && sameLabel(l1, l2)
-      case (LookupSwitch(op1, l1, keys1, ls1), LookupSwitch(op2, l2, keys2, ls2))         => op1 == op2 && sameLabel(l1, l2) && keys1 == keys2 && sameLabels(ls1, ls2)
-      case (TableSwitch(op1, min1, max1, l1, ls1), TableSwitch(op2, min2, max2, l2, ls2)) => op1 == op2 && min1 == min2 && max1 == max2 && sameLabel(l1, l2) && sameLabels(ls1, ls2)
-      case (LineNumber(line1, l1), LineNumber(line2, l2))                                 => line1 == line2 && sameLabel(l1, l2)
-      case (FrameEntry(tp1, loc1, stk1), FrameEntry(tp2, loc2, stk2))                     => tp1 == tp2 && sameFrameTypes(loc1, loc2) && sameFrameTypes(stk1, stk2)
+        case (l1 @ Label(_), l2 @ Label(_))                                         => sameLabel(l1, l2)
+        case (Jump(op1, l1), Jump(op2, l2))                                         => op1 == op2 && sameLabel(l1, l2)
+        case (LookupSwitch(op1, l1, keys1, ls1), LookupSwitch(op2, l2, keys2, ls2)) =>
+          op1 == op2 && sameLabel(l1, l2) && keys1 == keys2 && sameLabels(ls1, ls2)
+        case (TableSwitch(op1, min1, max1, l1, ls1), TableSwitch(op2, min2, max2, l2, ls2)) =>
+          op1 == op2 && min1 == min2 && max1 == max2 && sameLabel(l1, l2) && sameLabels(ls1, ls2)
+        case (LineNumber(line1, l1), LineNumber(line2, l2))             => line1 == line2 && sameLabel(l1, l2)
+        case (FrameEntry(tp1, loc1, stk1), FrameEntry(tp2, loc2, stk2)) =>
+          tp1 == tp2 && sameFrameTypes(loc1, loc2) && sameFrameTypes(stk1, stk2)
 
-      case (a, b) if a == b => true
+        case (a, b) if a == b => true
 
-      case _ => false
-    }) && equivalentBytecode(as.tail, bs.tail, varMap, labelMap)
+        case _ => false
+      }) && equivalentBytecode(as.tail, bs.tail, varMap, labelMap)
   }
 
   def applyToMethod(method: t.MethodNode, instructions: List[Instruction]): Unit = {
@@ -203,13 +224,17 @@ object ASMConverters {
   def applyToMethod(asmMethod: t.MethodNode, method: Method): Unit = {
     val asmLabel = createLabelNodes(method.instructions)
     method.instructions.foreach(visitMethod(asmMethod, _, asmLabel))
-    method.handlers.foreach(h => asmMethod.visitTryCatchBlock(asmLabel(h.start), asmLabel(h.end), asmLabel(h.handler), h.desc.orNull))
-    method.localVars.foreach(v => asmMethod.visitLocalVariable(v.name, v.desc, v.signature.orNull, asmLabel(v.start), asmLabel(v.end), v.index))
+    method.handlers.foreach(h =>
+      asmMethod.visitTryCatchBlock(asmLabel(h.start), asmLabel(h.end), asmLabel(h.handler), h.desc.orNull)
+    )
+    method.localVars.foreach(v =>
+      asmMethod.visitLocalVariable(v.name, v.desc, v.signature.orNull, asmLabel(v.start), asmLabel(v.end), v.index)
+    )
   }
 
   private def createLabelNodes(instructions: List[Instruction]): Map[Label, asm.Label] = {
-    val labels = instructions collect {
-      case l: Label => l
+    val labels = instructions collect { case l: Label =>
+      l
     }
     assert(labels.distinct == labels, s"Duplicate labels in: $labels")
     labels.map(l => (l, new asm.Label())).toMap
@@ -217,35 +242,51 @@ object ASMConverters {
 
   private def frameTypesToAsm(l: List[Any], asmLabel: Map[Label, asm.Label]): List[Object] = l map {
     case l: Label => asmLabel(l)
-    case x => x.asInstanceOf[Object]
+    case x        => x.asInstanceOf[Object]
   }
 
   def unconvertMethodHandle(h: MethodHandle): asm.Handle = new asm.Handle(h.tag, h.owner, h.name, h.desc, h.itf)
-  def unconvertBsmArgs(a: List[Object]): Array[Object] = a.iterator.map({
-    case h: MethodHandle => unconvertMethodHandle(h)
-    case o => o
-  }).toArray
+  def unconvertBsmArgs(a: List[Object]): Array[Object] = a.iterator
+    .map({
+      case h: MethodHandle => unconvertMethodHandle(h)
+      case o               => o
+    })
+    .toArray
 
-  private def visitMethod(method: t.MethodNode, instruction: Instruction, asmLabel: Map[Label, asm.Label]): Unit = instruction match {
-    case Field(op, owner, name, desc)                => method.visitFieldInsn(op, owner, name, desc)
-    case Incr(op, vr, incr)                          => method.visitIincInsn(vr, incr)
-    case Op(op)                                      => method.visitInsn(op)
-    case IntOp(op, operand)                          => method.visitIntInsn(op, operand)
-    case Jump(op, label)                             => method.visitJumpInsn(op, asmLabel(label))
-    case Ldc(op, cst)                                => method.visitLdcInsn(cst)
-    case LookupSwitch(op, dflt, keys, labels)        => method.visitLookupSwitchInsn(asmLabel(dflt), keys.toArray, (labels map asmLabel).toArray)
-    case TableSwitch(op, min, max, dflt, labels)     => method.visitTableSwitchInsn(min, max, asmLabel(dflt), (labels map asmLabel).toArray: _*)
-    case Invoke(op, owner, name, desc, itf)          => method.visitMethodInsn(op, owner, name, desc, itf)
-    case InvokeDynamic(op, name, desc, bsm, bsmArgs) => method.visitInvokeDynamicInsn(name, desc, unconvertMethodHandle(bsm), unconvertBsmArgs(bsmArgs))
-    case NewArray(op, desc, dims)                    => method.visitMultiANewArrayInsn(desc, dims)
-    case TypeOp(op, desc)                            => method.visitTypeInsn(op, desc)
-    case VarOp(op, vr)                               => method.visitVarInsn(op, vr)
-    case l: Label                                    => method.visitLabel(asmLabel(l))
-    case FrameEntry(tp, local, stack)                => method.visitFrame(tp, local.length, frameTypesToAsm(local, asmLabel).toArray, stack.length, frameTypesToAsm(stack, asmLabel).toArray)
-    case LineNumber(line, start)                     => method.visitLineNumber(line, asmLabel(start))
-  }
+  private def visitMethod(method: t.MethodNode, instruction: Instruction, asmLabel: Map[Label, asm.Label]): Unit =
+    instruction match {
+      case Field(op, owner, name, desc)         => method.visitFieldInsn(op, owner, name, desc)
+      case Incr(op, vr, incr)                   => method.visitIincInsn(vr, incr)
+      case Op(op)                               => method.visitInsn(op)
+      case IntOp(op, operand)                   => method.visitIntInsn(op, operand)
+      case Jump(op, label)                      => method.visitJumpInsn(op, asmLabel(label))
+      case Ldc(op, cst)                         => method.visitLdcInsn(cst)
+      case LookupSwitch(op, dflt, keys, labels) =>
+        method.visitLookupSwitchInsn(asmLabel(dflt), keys.toArray, (labels map asmLabel).toArray)
+      case TableSwitch(op, min, max, dflt, labels) =>
+        method.visitTableSwitchInsn(min, max, asmLabel(dflt), (labels map asmLabel).toArray: _*)
+      case Invoke(op, owner, name, desc, itf)          => method.visitMethodInsn(op, owner, name, desc, itf)
+      case InvokeDynamic(op, name, desc, bsm, bsmArgs) =>
+        method.visitInvokeDynamicInsn(name, desc, unconvertMethodHandle(bsm), unconvertBsmArgs(bsmArgs))
+      case NewArray(op, desc, dims)     => method.visitMultiANewArrayInsn(desc, dims)
+      case TypeOp(op, desc)             => method.visitTypeInsn(op, desc)
+      case VarOp(op, vr)                => method.visitVarInsn(op, vr)
+      case l: Label                     => method.visitLabel(asmLabel(l))
+      case FrameEntry(tp, local, stack) =>
+        method.visitFrame(
+          tp,
+          local.length,
+          frameTypesToAsm(local, asmLabel).toArray,
+          stack.length,
+          frameTypesToAsm(stack, asmLabel).toArray
+        )
+      case LineNumber(line, start) => method.visitLineNumber(line, asmLabel(start))
+    }
 
-  def InvokeVirtual(owner: String, name: String, desc: String): Invoke = Invoke(opcode = INVOKEVIRTUAL, owner, name, desc, itf = false)
-  def InvokeInterface(owner: String, name: String, desc: String): Invoke = Invoke(opcode = INVOKEINTERFACE, owner, name, desc, itf = true)
-  def InvokeStatic(owner: String, name: String, desc: String): Invoke = Invoke(opcode = INVOKESTATIC, owner, name, desc, itf = false)
+  def InvokeVirtual(owner: String, name: String, desc: String): Invoke =
+    Invoke(opcode = INVOKEVIRTUAL, owner, name, desc, itf = false)
+  def InvokeInterface(owner: String, name: String, desc: String): Invoke =
+    Invoke(opcode = INVOKEINTERFACE, owner, name, desc, itf = true)
+  def InvokeStatic(owner: String, name: String, desc: String): Invoke =
+    Invoke(opcode = INVOKESTATIC, owner, name, desc, itf = false)
 }

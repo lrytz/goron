@@ -7,7 +7,16 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{BackendReporting, BTypes, BTypesFromClassfile, CompilerSettings, CoreBTypes, LabelNode1, PerRunInit, PostProcessor}
+import goron.optimizer.{
+  BackendReporting,
+  BTypes,
+  BTypesFromClassfile,
+  CompilerSettings,
+  CoreBTypes,
+  LabelNode1,
+  PerRunInit,
+  PostProcessor
+}
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -45,7 +54,8 @@ abstract class Inliner {
     // If this InlinedCallsite has a warning about a given instruction, return a copy where the warning
     // only contains that instruction.
     def filterForWarning(insn: AbstractInsnNode): Option[InlinedCallsite] = warning match {
-      case Some(w) if w.instructions.contains(insn) => Some(this.copy(warning = Some(w.copy(instructions = List(insn)))))
+      case Some(w) if w.instructions.contains(insn) =>
+        Some(this.copy(warning = Some(w.copy(instructions = List(insn)))))
       case _ => None
     }
   }
@@ -86,7 +96,14 @@ abstract class Inliner {
       @tailrec def impl(insn: AbstractInsnNode, res: List[Callsite]): List[Callsite] = inlinedCalls.get(insn) match {
         case Some(inlinedCallsite) =>
           val cs = inlinedCallsite.eliminatedCallsite
-          val res1 = if (skipForwarders && backendUtils.isTraitSuperAccessorOrMixinForwarder(cs.callee.get.callee, cs.callee.get.calleeDeclarationClass)) res else cs :: res
+          val res1 =
+            if (
+              skipForwarders && backendUtils.isTraitSuperAccessorOrMixinForwarder(
+                cs.callee.get.callee,
+                cs.callee.get.calleeDeclarationClass
+              )
+            ) res
+            else cs :: res
           impl(cs.callsiteInstruction, res1)
         case _ =>
           res
@@ -102,25 +119,32 @@ abstract class Inliner {
     // `T.m` (even if the root callsite is `A.m`.
     // If the chain has only forwarders, `returnForwarderIfNoOther` determines whether to return `None`
     // or the last inlined forwarder.
-    def rootInlinedCallsiteWithWarning(call: AbstractInsnNode, returnForwarderIfNoOther: Boolean): Option[InlinedCallsite] = {
-      def isForwarder(callsite: Callsite) = backendUtils.isTraitSuperAccessorOrMixinForwarder(callsite.callee.get.callee, callsite.callee.get.calleeDeclarationClass)
+    def rootInlinedCallsiteWithWarning(
+        call: AbstractInsnNode,
+        returnForwarderIfNoOther: Boolean
+    ): Option[InlinedCallsite] = {
+      def isForwarder(callsite: Callsite) = backendUtils.isTraitSuperAccessorOrMixinForwarder(
+        callsite.callee.get.callee,
+        callsite.callee.get.calleeDeclarationClass
+      )
       def result(res: Option[InlinedCallsite]) = res match {
         case Some(r) if returnForwarderIfNoOther || !isForwarder(r.eliminatedCallsite) => res
-        case _ => None
+        case _                                                                         => None
       }
-      @tailrec def impl(insn: AbstractInsnNode, res: Option[InlinedCallsite]): Option[InlinedCallsite] = inlinedCalls.get(insn) match {
-        case Some(inlinedCallsite) =>
-          val w = inlinedCallsite.filterForWarning(insn)
-          if (w.isEmpty) result(res)
-          else {
-            val cs = inlinedCallsite.eliminatedCallsite
-            // The returned InlinedCallsite can be a forwarder if that forwarder was the initial callsite in the method
-            val nextRes = if (isForwarder(cs) && res.nonEmpty && !isForwarder(res.get.eliminatedCallsite)) res else w
-            impl(cs.callsiteInstruction, nextRes)
-          }
+      @tailrec def impl(insn: AbstractInsnNode, res: Option[InlinedCallsite]): Option[InlinedCallsite] =
+        inlinedCalls.get(insn) match {
+          case Some(inlinedCallsite) =>
+            val w = inlinedCallsite.filterForWarning(insn)
+            if (w.isEmpty) result(res)
+            else {
+              val cs = inlinedCallsite.eliminatedCallsite
+              // The returned InlinedCallsite can be a forwarder if that forwarder was the initial callsite in the method
+              val nextRes = if (isForwarder(cs) && res.nonEmpty && !isForwarder(res.get.eliminatedCallsite)) res else w
+              impl(cs.callsiteInstruction, nextRes)
+            }
 
-        case _ => result(res)
-      }
+          case _ => result(res)
+        }
       impl(call, None)
     }
   }
@@ -141,9 +165,9 @@ abstract class Inliner {
     private def active(callsiteClass: ClassBType, callsiteMethod: MethodNode): Boolean = {
       if (roots == null) {
         compilerSettings.optLogInline match {
-          case Some("_") => _active = true
+          case Some("_")    => _active = true
           case Some(prefix) => _active = s"${callsiteClass.internalName}.${callsiteMethod.name}" startsWith prefix
-          case _ => _active = false
+          case _            => _active = false
         }
         if (_active) {
           roots = mutable.ArrayBuffer.empty[InlineLogResult]
@@ -158,19 +182,27 @@ abstract class Inliner {
 
     private def bufferForOuter(outer: Option[Callsite]) = outer match {
       case Some(o) => downstream.getOrElse(o, roots)
-      case _ => roots
+      case _       => roots
     }
 
-    def logSuccess(request: InlineRequest, sizeBefore: Int, sizeAfter: Int, outer: Option[Callsite]) = if (active(request.callsite)) {
+    def logSuccess(request: InlineRequest, sizeBefore: Int, sizeAfter: Int, outer: Option[Callsite]) = if (
+      active(request.callsite)
+    ) {
       bufferForOuter(outer) += InlineLogSuccess(request, sizeBefore, sizeAfter)
       downstream(request.callsite) = mutable.ArrayBuffer.empty
     }
 
-    def logClosureRewrite(closureInit: ClosureInstantiation, invocations: mutable.ArrayBuffer[(MethodInsnNode, Int)], outer: Option[Callsite]) = if (active(closureInit.ownerClass, closureInit.ownerMethod)) {
+    def logClosureRewrite(
+        closureInit: ClosureInstantiation,
+        invocations: mutable.ArrayBuffer[(MethodInsnNode, Int)],
+        outer: Option[Callsite]
+    ) = if (active(closureInit.ownerClass, closureInit.ownerMethod)) {
       bufferForOuter(outer) += InlineLogRewrite(closureInit, invocations.map(_._1).toList)
     }
 
-    def logFail(request: InlineRequest, warning: CannotInlineWarning, outer: Option[Callsite]) = if (active(request.callsite)) {
+    def logFail(request: InlineRequest, warning: CannotInlineWarning, outer: Option[Callsite]) = if (
+      active(request.callsite)
+    ) {
       bufferForOuter(outer) += InlineLogFail(request, warning)
     }
 
@@ -183,13 +215,13 @@ abstract class Inliner {
     def print(): Unit = if (roots != null) {
       def printChildren(indent: Int, callsite: Callsite): Unit = downstream.get(callsite) match {
         case Some(logs) => logs.foreach(l => printLog(indent, l))
-        case _ =>
+        case _          =>
       }
       def printLog(indent: Int, log: InlineLogResult): Unit = {
         println(log.entryString(indent))
         log match {
           case s: InlineLogSuccess => printChildren(indent + 1, s.request.callsite)
-          case _ =>
+          case _                   =>
         }
       }
       roots.size match {
@@ -229,7 +261,8 @@ abstract class Inliner {
       }
     }
     final case class InlineLogSuccess(request: InlineRequest, sizeBefore: Int, sizeAfter: Int) extends InlineLogResult
-    final case class InlineLogRewrite(closureInit: ClosureInstantiation, invocations: List[MethodInsnNode]) extends InlineLogResult
+    final case class InlineLogRewrite(closureInit: ClosureInstantiation, invocations: List[MethodInsnNode])
+        extends InlineLogResult
     final case class InlineLogFail(request: InlineRequest, warning: CannotInlineWarning) extends InlineLogResult
     final case class InlineLogRollback(reason: String) extends InlineLogResult
   }
@@ -256,8 +289,8 @@ abstract class Inliner {
           }
 
           mi.name != INSTANCE_CONSTRUCTOR_NAME &&
-            mi.owner == callsite.callee.get.calleeDeclarationClass.internalName &&
-            byteCodeRepository.classNode(mi.owner).map(hasMethod).getOrElse(false)
+          mi.owner == callsite.callee.get.calleeDeclarationClass.internalName &&
+          byteCodeRepository.classNode(mi.owner).map(hasMethod).getOrElse(false)
         }
       case _ => false
     })
@@ -280,7 +313,12 @@ abstract class Inliner {
       if (runClosureOptimizer) {
         val specificMethodsForClosureRewriting = if (round == 0) None else Some(changedByInliner)
         // TODO: remove cast by moving `MethodInlinerState` and other classes from inliner to a separate PostProcessor component
-        changedByClosureOptimizer = closureOptimizer.rewriteClosureApplyInvocations(specificMethodsForClosureRewriting, inlinerState.asInstanceOf[mutable.Map[MethodNode, postProcessor.closureOptimizer.postProcessor.inliner.MethodInlinerState]])
+        changedByClosureOptimizer = closureOptimizer.rewriteClosureApplyInvocations(
+          specificMethodsForClosureRewriting,
+          inlinerState.asInstanceOf[
+            mutable.Map[MethodNode, postProcessor.closureOptimizer.postProcessor.inliner.MethodInlinerState]
+          ]
+        )
       }
 
       var logs = List.empty[(MethodNode, InlineLog)]
@@ -290,7 +328,8 @@ abstract class Inliner {
       }
       if (logs.nonEmpty) {
         // Deterministic inline log
-        val sortedLogs = logs.sorted(Ordering.by[(MethodNode, InlineLog), (String, String)](p => (p._1.name, p._1.desc)))
+        val sortedLogs =
+          logs.sorted(Ordering.by[(MethodNode, InlineLog), (String, String)](p => (p._1.name, p._1.desc)))
         sortedLogs.foreach(_._2.print())
       }
 
@@ -298,11 +337,16 @@ abstract class Inliner {
     }
   }
 
-  /**
-   * @param methods The methods to check for callsites to inline. If not defined, check all methods.
-   * @return The set of changed methods, in no deterministic order.
-   */
-  def runInliner(methods: Option[mutable.LinkedHashSet[MethodNode]], inlinerState: mutable.Map[MethodNode, MethodInlinerState], failed: mutable.Set[MethodInsnNode]): Iterable[MethodNode] = {
+  /** @param methods
+    *   The methods to check for callsites to inline. If not defined, check all methods.
+    * @return
+    *   The set of changed methods, in no deterministic order.
+    */
+  def runInliner(
+      methods: Option[mutable.LinkedHashSet[MethodNode]],
+      inlinerState: mutable.Map[MethodNode, MethodInlinerState],
+      failed: mutable.Set[MethodInsnNode]
+  ): Iterable[MethodNode] = {
     // Inline requests are grouped by method for performance: we only update the call graph (which
     // runs analyzers) once all callsites are inlined.
     val requests: mutable.Queue[(MethodNode, List[InlineRequest])] =
@@ -323,11 +367,19 @@ abstract class Inliner {
 
     // Show chain of inlines that lead to a failure in inliner warnings
     def inlineChainSuffix(callsite: Callsite, chain: List[Callsite]): String =
-      if (chain.isEmpty) "" else
+      if (chain.isEmpty) ""
+      else
         s"""
-           |Note that this callsite was itself inlined into ${BackendReporting.methodSignature(callsite.callsiteClass.internalName, callsite.callsiteMethod)}
+           |Note that this callsite was itself inlined into ${BackendReporting.methodSignature(
+            callsite.callsiteClass.internalName,
+            callsite.callsiteMethod
+          )}
            |by inlining the following methods:
-           |${chain.map(cs => BackendReporting.methodSignature(cs.callee.get.calleeDeclarationClass.internalName, cs.callee.get.callee)).mkString("  - ", "\n  - ", "")}""".stripMargin
+           |${chain
+            .map(cs =>
+              BackendReporting.methodSignature(cs.callee.get.calleeDeclarationClass.internalName, cs.callee.get.callee)
+            )
+            .mkString("  - ", "\n  - ", "")}""".stripMargin
 
     while (requests.nonEmpty || changedMethods.nonEmpty) {
       // First inline all requests that were initially collected. Then check methods that changed
@@ -344,13 +396,18 @@ abstract class Inliner {
         val state = inlinerState.getOrElseUpdate(method, new MethodInlinerState)
         var changed = false
 
-        def doInline(r: InlineRequest, aliasFrame: AliasingFrame[Value], w: Option[IllegalAccessInstructions]): Map[AbstractInsnNode, AbstractInsnNode] = {
+        def doInline(
+            r: InlineRequest,
+            aliasFrame: AliasingFrame[Value],
+            w: Option[IllegalAccessInstructions]
+        ): Map[AbstractInsnNode, AbstractInsnNode] = {
           val sizeBefore = method.instructions.size // cheap (a field read)
           val instructionMap = inlineCallsite(r.callsite, Some(aliasFrame), updateCallGraph = false)
-          val inlined = InlinedCallsite(r.callsite, w.map(iw => iw.copy(instructions = iw.instructions.map(instructionMap))))
+          val inlined =
+            InlinedCallsite(r.callsite, w.map(iw => iw.copy(instructions = iw.instructions.map(instructionMap))))
           instructionMap.valuesIterator foreach {
             case mi: MethodInsnNode => state.inlinedCalls(mi) = inlined
-            case _ =>
+            case _                  =>
           }
           for (warn <- w; ins <- warn.instructions) {
             state.illegalAccessInstructions += instructionMap(ins)
@@ -359,7 +416,12 @@ abstract class Inliner {
           state.illegalAccessInstructions.subtractOne(callInsn)
           if (state.illegalAccessInstructions.isEmpty)
             state.undoLog = NoUndoLogging
-          state.inlineLog.logSuccess(r, sizeBefore, method.instructions.size, state.outerCallsite(r.callsite.callsiteInstruction))
+          state.inlineLog.logSuccess(
+            r,
+            sizeBefore,
+            method.instructions.size,
+            state.outerCallsite(r.callsite.callsiteInstruction)
+          )
           changed = true
           instructionMap
         }
@@ -400,26 +462,41 @@ abstract class Inliner {
               state.inlineLog.logFail(r, w, state.outerCallsite(r.callsite.callsiteInstruction))
 
               if (state.illegalAccessInstructions(callInsn)) {
-                state.inlineLog.logRollback(r.callsite, "The callsite could not be inlined, keeping it would cause an IllegalAccessError", state.outerCallsite(r.callsite.callsiteInstruction))
+                state.inlineLog.logRollback(
+                  r.callsite,
+                  "The callsite could not be inlined, keeping it would cause an IllegalAccessError",
+                  state.outerCallsite(r.callsite.callsiteInstruction)
+                )
                 state.undoLog.rollback()
                 currentMethodRolledBack = true
               }
 
-              state.rootInlinedCallsiteWithWarning(r.callsite.callsiteInstruction, returnForwarderIfNoOther = false) match {
+              state.rootInlinedCallsiteWithWarning(
+                r.callsite.callsiteInstruction,
+                returnForwarderIfNoOther = false
+              ) match {
                 case Some(inlinedCallsite) =>
                   val rw = inlinedCallsite.warning.get
                   if (rw.emitWarning(compilerSettings)) {
                     backendReporting.optimizerWarning(
                       inlinedCallsite.eliminatedCallsite.callsitePosition,
-                      rw.toString + inlineChainSuffix(r.callsite, state.inlineChain(inlinedCallsite.eliminatedCallsite.callsiteInstruction, skipForwarders = true)),
-                      backendUtils.optimizerWarningSiteString(inlinedCallsite.eliminatedCallsite))
+                      rw.toString + inlineChainSuffix(
+                        r.callsite,
+                        state.inlineChain(inlinedCallsite.eliminatedCallsite.callsiteInstruction, skipForwarders = true)
+                      ),
+                      backendUtils.optimizerWarningSiteString(inlinedCallsite.eliminatedCallsite)
+                    )
                   }
                 case _ =>
                   if (w.emitWarning(compilerSettings))
                     backendReporting.optimizerWarning(
                       r.callsite.callsitePosition,
-                      w.toString + inlineChainSuffix(r.callsite, state.inlineChain(r.callsite.callsiteInstruction, skipForwarders = true)),
-                      backendUtils.optimizerWarningSiteString(r.callsite))
+                      w.toString + inlineChainSuffix(
+                        r.callsite,
+                        state.inlineChain(r.callsite.callsiteInstruction, skipForwarders = true)
+                      ),
+                      backendUtils.optimizerWarningSiteString(r.callsite)
+                    )
               }
           }
         }
@@ -448,14 +525,19 @@ abstract class Inliner {
         val rs = mutable.ListBuffer.empty[InlineRequest]
         callGraph.callsites(method).valuesIterator foreach {
           // Don't inline: recursive calls, callsites that failed inlining before
-          case cs: Callsite if !failed(cs.callsiteInstruction) && cs.callee.isRight && !isLoop(cs.callsiteInstruction, cs.callee.get) =>
+          case cs: Callsite
+              if !failed(cs.callsiteInstruction) && cs.callee.isRight && !isLoop(
+                cs.callsiteInstruction,
+                cs.callee.get
+              ) =>
             inlineRequest(cs) match {
               case Some(Right(req)) => rs += req
-              case _ =>
+              case _                =>
             }
           case _ =>
         }
-        val newRequests = selectRequestsForMethodSize(method, rs.toList.sorted(inlineRequestOrdering), mutable.Map.empty)
+        val newRequests =
+          selectRequestsForMethodSize(method, rs.toList.sorted(inlineRequestOrdering), mutable.Map.empty)
 
         state.illegalAccessInstructions.find(insn => newRequests.forall(_.callsite.callsiteInstruction != insn)) match {
           case None =>
@@ -468,12 +550,20 @@ abstract class Inliner {
               case Some(inlinedCallsite) =>
                 val callsite = inlinedCallsite.eliminatedCallsite
                 val w = inlinedCallsite.warning.get
-                state.inlineLog.logRollback(callsite, s"Instruction ${AsmUtils.textify(notInlinedIllegalInsn)} would cause an IllegalAccessError, and is not selected for (or failed) inlining", state.outerCallsite(notInlinedIllegalInsn))
+                state.inlineLog.logRollback(
+                  callsite,
+                  s"Instruction ${AsmUtils.textify(notInlinedIllegalInsn)} would cause an IllegalAccessError, and is not selected for (or failed) inlining",
+                  state.outerCallsite(notInlinedIllegalInsn)
+                )
                 if (w.emitWarning(compilerSettings))
                   backendReporting.optimizerWarning(
                     callsite.callsitePosition,
-                    w.toString + inlineChainSuffix(callsite, state.inlineChain(callsite.callsiteInstruction, skipForwarders = true)),
-                    backendUtils.optimizerWarningSiteString(callsite))
+                    w.toString + inlineChainSuffix(
+                      callsite,
+                      state.inlineChain(callsite.callsiteInstruction, skipForwarders = true)
+                    ),
+                    backendUtils.optimizerWarningSiteString(callsite)
+                  )
               case _ =>
                 // TODO: replace by dev warning after testing
                 assert(false, "should not happen")
@@ -487,11 +577,10 @@ abstract class Inliner {
     overallChangedMethods
   }
 
-  /**
-   * Ordering for inline requests. Required to make the inliner deterministic:
-   *   - Always remove the same request when breaking inlining cycles
-   *   - Perform inlinings in a consistent order
-   */
+  /** Ordering for inline requests. Required to make the inliner deterministic:
+    *   - Always remove the same request when breaking inlining cycles
+    *   - Perform inlinings in a consistent order
+    */
   object callsiteOrdering extends Ordering[Callsite] {
     override def compare(x: Callsite, y: Callsite): Int = {
       if (x eq y) return 0
@@ -512,13 +601,12 @@ abstract class Inliner {
 
   val inlineRequestOrdering = Ordering.by[InlineRequest, Callsite](_.callsite)(callsiteOrdering)
 
-  /**
-   * Returns the callsites that can be inlined, grouped by method. Ensures that the returned inline
-   * request graph does not contain cycles.
-   *
-   * The resulting list is sorted such that the leaves of the inline request graph are on the left.
-   * Once these leaves are inlined, the successive elements will be leaves, etc.
-   */
+  /** Returns the callsites that can be inlined, grouped by method. Ensures that the returned inline request graph does
+    * not contain cycles.
+    *
+    * The resulting list is sorted such that the leaves of the inline request graph are on the left. Once these leaves
+    * are inlined, the successive elements will be leaves, etc.
+    */
   private def collectAndOrderInlineRequests: mutable.Queue[(MethodNode, List[InlineRequest])] = {
     val requestsByMethod = selectCallsitesForInlining withDefaultValue Set.empty
 
@@ -581,7 +669,9 @@ abstract class Inliner {
 
     // sort the remaining inline requests such that the leaves appear first, then those requests
     // that become leaves, etc.
-    def leavesFirst(requests: List[(MethodNode, List[InlineRequest])]): mutable.Queue[(MethodNode, List[InlineRequest])] = {
+    def leavesFirst(
+        requests: List[(MethodNode, List[InlineRequest])]
+    ): mutable.Queue[(MethodNode, List[InlineRequest])] = {
       val result = mutable.Queue.empty[(MethodNode, List[InlineRequest])]
       val visited = mutable.Set.empty[MethodNode]
 
@@ -609,7 +699,7 @@ abstract class Inliner {
     for ((method, rs) <- sortedRequests) {
       val sizeOkRs = selectRequestsForMethodSize(method, rs, methodSizes)
       if (sizeOkRs.nonEmpty)
-      result += ((method, sizeOkRs))
+        result += ((method, sizeOkRs))
     }
     result
   }
@@ -663,24 +753,30 @@ abstract class Inliner {
 
         onIndyLambdaImplMethodIfPresent(ownerClass.internalName)(_.subtractOne(methodNode))
         if (currentIndyLambdaBodyMethods.nonEmpty)
-          onIndyLambdaImplMethod(ownerClass.internalName)(ms => ms(methodNode) = mutable.Map.empty ++= currentIndyLambdaBodyMethods)
+          onIndyLambdaImplMethod(ownerClass.internalName)(ms =>
+            ms(methodNode) = mutable.Map.empty ++= currentIndyLambdaBodyMethods
+          )
       }
     }
   }
 
   val NoUndoLogging = new UndoLog(active = false)
 
-  /**
-   * Copy and adapt the instructions of a method to a callsite.
-   *
-   * Preconditions:
-   *   - The callsite can safely be inlined (canInlineBody is true)
-   *   - The maxLocals and maxStack values of the callsite method are correctly computed
-   *
-   * @return A map associating instruction nodes of the callee with the corresponding cloned
-   *         instruction in the callsite method.
-   */
-  def inlineCallsite(callsite: Callsite, aliasFrame: Option[AliasingFrame[Value]] = None, updateCallGraph: Boolean = true): Map[AbstractInsnNode, AbstractInsnNode] = {
+  /** Copy and adapt the instructions of a method to a callsite.
+    *
+    * Preconditions:
+    *   - The callsite can safely be inlined (canInlineBody is true)
+    *   - The maxLocals and maxStack values of the callsite method are correctly computed
+    *
+    * @return
+    *   A map associating instruction nodes of the callee with the corresponding cloned instruction in the callsite
+    *   method.
+    */
+  def inlineCallsite(
+      callsite: Callsite,
+      aliasFrame: Option[AliasingFrame[Value]] = None,
+      updateCallGraph: Boolean = true
+  ): Map[AbstractInsnNode, AbstractInsnNode] = {
     import callsite._
     val Right(callsiteCallee) = callsite.callee: @unchecked
     import callsiteCallee.{callee, calleeDeclarationClass, sourceFilePath}
@@ -701,13 +797,15 @@ abstract class Inliner {
     // New labels for the cloned instructions
     val labelsMap = cloneLabels(callee)
     val sameSourceFile = sourceFilePath match {
-      case Some(calleeSource) => byteCodeRepository.compilingClasses.get(callsiteClass.internalName) match {
-        case Some((_, `calleeSource`)) => true
-        case _ => false
-      }
+      case Some(calleeSource) =>
+        byteCodeRepository.compilingClasses.get(callsiteClass.internalName) match {
+          case Some((_, `calleeSource`)) => true
+          case _                         => false
+        }
       case _ => false
     }
-    val (clonedInstructions, instructionMap, writtenLocals) = cloneInstructions(callee, labelsMap, callsitePosition, keepLineNumbers = sameSourceFile)
+    val (clonedInstructions, instructionMap, writtenLocals) =
+      cloneInstructions(callee, labelsMap, callsitePosition, keepLineNumbers = sameSourceFile)
 
     val refLocals = mutable.BitSet.empty
 
@@ -802,11 +900,13 @@ abstract class Inliner {
       calleeParamSlot += 1
     }
 
-    for(argTp <- calleeParamTypes) {
+    for (argTp <- calleeParamTypes) {
       val argLocalSlot = calleeParamLocals(calleeParamSlot)
       if (argLocalSlot >= numCallsiteLocals) {
         val opc = argTp.getOpcode(ISTORE) // returns the correct xSTORE instruction for argTp
-        argStores.insert(new VarInsnNode(opc, argLocalSlot)) // "insert" is "prepend" - the last argument is on the top of the stack
+        argStores.insert(
+          new VarInsnNode(opc, argLocalSlot)
+        ) // "insert" is "prepend" - the last argument is on the top of the stack
         if (opc == ASTORE) {
           nullOutLocals.add(new InsnNode(ACONST_NULL))
           nullOutLocals.add(new VarInsnNode(ASTORE, argLocalSlot))
@@ -832,7 +932,7 @@ abstract class Inliner {
           BytecodeUtils.nextExecutableInstruction(callsiteInstruction).flatMap(BytecodeUtils.previousLineNumber) match {
             case Some(line1) =>
               if (line == line1)
-              // SD-479 code follows on the same line, restore the line number
+                // SD-479 code follows on the same line, restore the line number
                 clonedInstructions.add(new LineNumberNode(line, postCallLabel))
             case None =>
           }
@@ -937,7 +1037,8 @@ abstract class Inliner {
     // an exception is thrown in the inlined code.
     callsiteMethod.tryCatchBlocks.addAll(0, cloneTryCatchBlockNodes(callee, labelsMap).asJava)
 
-    callsiteMethod.maxLocals = BackendUtils.maxLocals(callsiteMethod) + BackendUtils.maxLocals(callee) - numSavedParamSlots + returnType.getSize
+    callsiteMethod.maxLocals =
+      BackendUtils.maxLocals(callsiteMethod) + BackendUtils.maxLocals(callee) - numSavedParamSlots + returnType.getSize
     val maxStackOfInlinedCode = {
       // One slot per value is correct for long / double, see comment in the `analysis` package object.
       val numStoredArgs = calleeParamTypes.length + (if (isStatic) 0 else 1)
@@ -950,28 +1051,30 @@ abstract class Inliner {
           // If the callsite has other argument values than the receiver on the stack, these are pop'ed
           // and stored into locals before the null check, so in that case the maxStack doesn't grow.
           1
-        }
-        else if (hasNullOutInsn) {
+        } else if (hasNullOutInsn) {
           // after the return value is loaded, local variables and the return local variable are
           // nulled out, which means `null` is loaded to the stack. the max stack height is the
           // callsite stack height +1 (receiver consumed, result produced, null loaded), but +2
           // for static calls
           if (isStatic) 2 else 1
-        }
-        else 0
+        } else 0
       callsiteStackHeight + stackSlotForNullCheck
     }
 
-    callsiteMethod.maxStack = math.max(BackendUtils.maxStack(callsiteMethod), math.max(stackHeightAtNullCheck, maxStackOfInlinedCode))
+    callsiteMethod.maxStack =
+      math.max(BackendUtils.maxStack(callsiteMethod), math.max(stackHeightAtNullCheck, maxStackOfInlinedCode))
 
-    lazy val callsiteLambdaBodyMethods = onIndyLambdaImplMethod(callsiteClass.internalName)(_.getOrElseUpdate(callsiteMethod, mutable.Map.empty))
-    onIndyLambdaImplMethodIfPresent(calleeDeclarationClass.internalName)(methods => methods.getOrElse(callee, Nil) foreach {
-      case (indy, handle) => instructionMap.get(indy) match {
-        case Some(clonedIndy: InvokeDynamicInsnNode) =>
-          callsiteLambdaBodyMethods(clonedIndy) = handle
-        case _ =>
+    lazy val callsiteLambdaBodyMethods =
+      onIndyLambdaImplMethod(callsiteClass.internalName)(_.getOrElseUpdate(callsiteMethod, mutable.Map.empty))
+    onIndyLambdaImplMethodIfPresent(calleeDeclarationClass.internalName)(methods =>
+      methods.getOrElse(callee, Nil) foreach { case (indy, handle) =>
+        instructionMap.get(indy) match {
+          case Some(clonedIndy: InvokeDynamicInsnNode) =>
+            callsiteLambdaBodyMethods(clonedIndy) = handle
+          case _ =>
+        }
       }
-    })
+    )
 
     // Don't remove the inlined instruction from callsitePositions, inlineAnnotatedCallsites so that
     // the information is still there in case the method is rolled back (UndoLog).
@@ -984,16 +1087,16 @@ abstract class Inliner {
     instructionMap
   }
 
-  /**
-   * Check whether an inlining can be performed. This method performs tests that don't change even
-   * if the body of the callee is changed by the inliner / optimizer, so it can be used early
-   * (when looking at the call graph and collecting inline requests for the program).
-   *
-   * The tests that inspect the callee's instructions are implemented in method `canInlineBody`,
-   * which is queried when performing an inline.
-   *
-   * @return `Some(message)` if inlining cannot be performed, `None` otherwise
-   */
+  /** Check whether an inlining can be performed. This method performs tests that don't change even if the body of the
+    * callee is changed by the inliner / optimizer, so it can be used early (when looking at the call graph and
+    * collecting inline requests for the program).
+    *
+    * The tests that inspect the callee's instructions are implemented in method `canInlineBody`, which is queried when
+    * performing an inline.
+    *
+    * @return
+    *   `Some(message)` if inlining cannot be performed, `None` otherwise
+    */
   def earlyCanInlineCheck(callsite: Callsite): Option[CannotInlineWarning] = {
     import callsite.{callsiteClass, callsiteMethod}
     val Right(callsiteCallee) = callsite.callee: @unchecked
@@ -1002,34 +1105,42 @@ abstract class Inliner {
     if (isSynchronizedMethod(callee)) {
       // Could be done by locking on the receiver, wrapping the inlined code in a try and unlocking
       // in finally. But it's probably not worth the effort, scala never emits synchronized methods.
-      Some(SynchronizedMethod(calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated))
+      Some(
+        SynchronizedMethod(calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated)
+      )
     } else if (isStrictfpMethod(callsiteMethod) != isStrictfpMethod(callee)) {
-      Some(StrictfpMismatch(
-        calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated,
-        callsiteClass.internalName, callsiteMethod.name, callsiteMethod.desc))
+      Some(
+        StrictfpMismatch(
+          calleeDeclarationClass.internalName,
+          callee.name,
+          callee.desc,
+          callsite.isInlineAnnotated,
+          callsiteClass.internalName,
+          callsiteMethod.name,
+          callsiteMethod.desc
+        )
+      )
     } else if (callee.instructions.size == 0) {
       Some(NoBytecode(calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated))
     } else
       None
   }
 
-  /**
-   * Check whether the body of the callee contains any instructions that prevent the callsite from
-   * being inlined. See also method `earlyCanInlineCheck`.
-   *
-   * The result of this check depends on changes to the callee method's body. For example, if the
-   * callee initially invokes a private method, it cannot be inlined into a different class. If the
-   * private method is inlined into the callee, inlining the callee becomes possible. Therefore
-   * we don't query it while traversing the call graph and selecting callsites to inline - it might
-   * rule out callsites that can be inlined just fine.
-   *
-   * Returns
-   *  - `None` if the callsite can be inlined
-   *  - `Some((message, Nil))` if there was an issue performing the access checks, for example
-   *    because of a missing classfile
-   *  - `Some((message, instructions))` if inlining `instructions` into the callsite method would
-   *    cause an IllegalAccessError
-   */
+  /** Check whether the body of the callee contains any instructions that prevent the callsite from being inlined. See
+    * also method `earlyCanInlineCheck`.
+    *
+    * The result of this check depends on changes to the callee method's body. For example, if the callee initially
+    * invokes a private method, it cannot be inlined into a different class. If the private method is inlined into the
+    * callee, inlining the callee becomes possible. Therefore we don't query it while traversing the call graph and
+    * selecting callsites to inline - it might rule out callsites that can be inlined just fine.
+    *
+    * Returns
+    *   - `None` if the callsite can be inlined
+    *   - `Some((message, Nil))` if there was an issue performing the access checks, for example because of a missing
+    *     classfile
+    *   - `Some((message, instructions))` if inlining `instructions` into the callsite method would cause an
+    *     IllegalAccessError
+    */
   def canInlineCallsite(callsite: Callsite): Option[CannotInlineWarning] = {
     import callsite.{callsiteClass, callsiteInstruction, callsiteMethod, callsiteStackHeight}
     val Right(callsiteCallee) = callsite.callee: @unchecked
@@ -1041,7 +1152,10 @@ abstract class Inliner {
     assert(callsiteInstruction.desc == callee.desc, methodMismatch)
     assert(!isConstructor(callee), s"Constructors cannot be inlined: $calleeDesc")
     assert(!BytecodeUtils.isAbstractMethod(callee), s"Callee is abstract: $calleeDesc")
-    assert(callsiteMethod.instructions.contains(callsiteInstruction), s"Callsite ${textify(callsiteInstruction)} is not an instruction of $callsiteClass.${callsiteMethod.name}${callsiteMethod.desc}")
+    assert(
+      callsiteMethod.instructions.contains(callsiteInstruction),
+      s"Callsite ${textify(callsiteInstruction)} is not an instruction of $callsiteClass.${callsiteMethod.name}${callsiteMethod.desc}"
+    )
 
     // When an exception is thrown, the stack is cleared before jumping to the handler. When
     // inlining a method that catches an exception, all values that were on the stack before the
@@ -1051,92 +1165,116 @@ abstract class Inliner {
     // that would be inefficient: we'd need to pop all parameters, save the values, and push the
     // parameters back for the (inlined) invocation. Similarly for the result after the call.
     def stackHasNonParameters: Boolean = {
-      val expectedArgs = asm.Type.getArgumentTypes(callsiteInstruction.desc).length + (callsiteInstruction.getOpcode match {
-        case INVOKEVIRTUAL | INVOKESPECIAL | INVOKEINTERFACE => 1
-        case INVOKESTATIC => 0
-        case INVOKEDYNAMIC =>
-          assertionError(s"Unexpected opcode, cannot inline ${textify(callsiteInstruction)}")
-      })
+      val expectedArgs =
+        asm.Type.getArgumentTypes(callsiteInstruction.desc).length + (callsiteInstruction.getOpcode match {
+          case INVOKEVIRTUAL | INVOKESPECIAL | INVOKEINTERFACE => 1
+          case INVOKESTATIC                                    => 0
+          case INVOKEDYNAMIC                                   =>
+            assertionError(s"Unexpected opcode, cannot inline ${textify(callsiteInstruction)}")
+        })
       callsiteStackHeight > expectedArgs
     }
 
     if (callsiteTooLargeAfterInlining(callsiteMethod, callee)) {
       val warning = ResultingMethodTooLarge(
-        calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated,
-        callsiteClass.internalName, callsiteMethod.name, callsiteMethod.desc)
+        calleeDeclarationClass.internalName,
+        callee.name,
+        callee.desc,
+        callsite.isInlineAnnotated,
+        callsiteClass.internalName,
+        callsiteMethod.name,
+        callsiteMethod.desc
+      )
       Some(warning)
     } else if (!callee.tryCatchBlocks.isEmpty && stackHasNonParameters) {
       val warning = MethodWithHandlerCalledOnNonEmptyStack(
-        calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated,
-        callsiteClass.internalName, callsiteMethod.name, callsiteMethod.desc)
+        calleeDeclarationClass.internalName,
+        callee.name,
+        callee.desc,
+        callsite.isInlineAnnotated,
+        callsiteClass.internalName,
+        callsiteMethod.name,
+        callsiteMethod.desc
+      )
       Some(warning)
-    } else findIllegalAccess(callee.instructions, calleeDeclarationClass, callsiteClass) match {
-      case Right(Nil) =>
-        None
+    } else
+      findIllegalAccess(callee.instructions, calleeDeclarationClass, callsiteClass) match {
+        case Right(Nil) =>
+          None
 
-      case Right(illegalAccessInsns) =>
-        val warning = IllegalAccessInstructions(
-          calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated,
-          callsiteClass.internalName, illegalAccessInsns)
-        Some(warning)
+        case Right(illegalAccessInsns) =>
+          val warning = IllegalAccessInstructions(
+            calleeDeclarationClass.internalName,
+            callee.name,
+            callee.desc,
+            callsite.isInlineAnnotated,
+            callsiteClass.internalName,
+            illegalAccessInsns
+          )
+          Some(warning)
 
-      case Left((illegalAccessIns, cause)) =>
-        val warning = IllegalAccessCheckFailed(
-          calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated,
-          callsiteClass.internalName, illegalAccessIns, cause)
-        Some(warning)
-    }
+        case Left((illegalAccessIns, cause)) =>
+          val warning = IllegalAccessCheckFailed(
+            calleeDeclarationClass.internalName,
+            callee.name,
+            callee.desc,
+            callsite.isInlineAnnotated,
+            callsiteClass.internalName,
+            illegalAccessIns,
+            cause
+          )
+          Some(warning)
+      }
   }
 
-  /**
-   * Check if a type is accessible to some class, as defined in JVMS 5.4.4.
-   *  (A1) C is public
-   *  (A2) C and D are members of the same run-time package
-   */
+  /** Check if a type is accessible to some class, as defined in JVMS 5.4.4. (A1) C is public (A2) C and D are members
+    * of the same run-time package
+    */
   @tailrec
-  final def classIsAccessible(accessed: BType, from: ClassBType): Either[OptimizerWarning, Boolean] = (accessed: @unchecked) match {
-    // TODO: A2 requires "same run-time package", which seems to be package + classloader (JVMS 5.3.). is the below ok?
-    case c: ClassBType     => c.isPublic.map(_ || c.packageInternalName == from.packageInternalName)
-    case a: ArrayBType     => classIsAccessible(a.elementType, from)
-    case _: PrimitiveBType => Right(true)
-  }
+  final def classIsAccessible(accessed: BType, from: ClassBType): Either[OptimizerWarning, Boolean] =
+    (accessed: @unchecked) match {
+      // TODO: A2 requires "same run-time package", which seems to be package + classloader (JVMS 5.3.). is the below ok?
+      case c: ClassBType     => c.isPublic.map(_ || c.packageInternalName == from.packageInternalName)
+      case a: ArrayBType     => classIsAccessible(a.elementType, from)
+      case _: PrimitiveBType => Right(true)
+    }
 
-  /**
-   * Check if a member reference is accessible from the `destinationClass`, as defined in the
-   * JVMS 5.4.4. Note that the class name in a field / method reference is not necessarily the
-   * class in which the member is declared:
-   *
-   *   class A { def f = 0 }; class B extends A { f }
-   *
-   * The INVOKEVIRTUAL instruction uses a method reference "B.f ()I". Therefore this method has
-   * two parameters:
-   *
-   * @param memberDeclClass The class in which the member is declared (A)
-   * @param memberRefClass  The class used in the member reference (B)
-   *
-   * (B0) JVMS 5.4.3.2 / 5.4.3.3: when resolving a member of class C in D, the class C is resolved
-   * first. According to 5.4.3.1, this requires C to be accessible in D.
-   *
-   * JVMS 5.4.4 summary: A field or method R is accessible to a class D (destinationClass) iff
-   *  (B1) R is public
-   *  (B2) R is protected, declared in C (memberDeclClass) and D is a subclass of C.
-   *       If R is not static, R must contain a symbolic reference to a class T (memberRefClass),
-   *       such that T is either a subclass of D, a superclass of D, or D itself.
-   *       Also (P) needs to be satisfied.
-   *  (B3) R is either protected or has default access and declared by a class in the same
-   *       run-time package as D.
-   *       If R is protected, also (P) needs to be satisfied.
-   *  (B4) R is private and is declared in D.
-   *
-   *  (P) When accessing a protected instance member, the target object on the stack (the receiver)
-   *      has to be a subtype of D (destinationClass). This is enforced by classfile verification
-   *      (https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.10.1.8).
-   *
-   * TODO: we cannot currently implement (P) because we don't have the necessary information
-   * available. Once we have a type propagation analysis implemented, we can extract the receiver
-   * type from there (https://github.com/scala-opt/scala/issues/13).
-   */
-  def memberIsAccessible(memberFlags: Int, memberDeclClass: ClassBType, memberRefClass: ClassBType, from: ClassBType): Either[OptimizerWarning, Boolean] = {
+  /** Check if a member reference is accessible from the `destinationClass`, as defined in the JVMS 5.4.4. Note that the
+    * class name in a field / method reference is not necessarily the class in which the member is declared:
+    *
+    * class A { def f = 0 }; class B extends A { f }
+    *
+    * The INVOKEVIRTUAL instruction uses a method reference "B.f ()I". Therefore this method has two parameters:
+    *
+    * @param memberDeclClass
+    *   The class in which the member is declared (A)
+    * @param memberRefClass
+    *   The class used in the member reference (B)
+    *
+    * (B0) JVMS 5.4.3.2 / 5.4.3.3: when resolving a member of class C in D, the class C is resolved first. According to
+    * 5.4.3.1, this requires C to be accessible in D.
+    *
+    * JVMS 5.4.4 summary: A field or method R is accessible to a class D (destinationClass) iff (B1) R is public (B2) R
+    * is protected, declared in C (memberDeclClass) and D is a subclass of C. If R is not static, R must contain a
+    * symbolic reference to a class T (memberRefClass), such that T is either a subclass of D, a superclass of D, or D
+    * itself. Also (P) needs to be satisfied. (B3) R is either protected or has default access and declared by a class
+    * in the same run-time package as D. If R is protected, also (P) needs to be satisfied. (B4) R is private and is
+    * declared in D.
+    *
+    * (P) When accessing a protected instance member, the target object on the stack (the receiver) has to be a subtype
+    * of D (destinationClass). This is enforced by classfile verification
+    * (https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.10.1.8).
+    *
+    * TODO: we cannot currently implement (P) because we don't have the necessary information available. Once we have a
+    * type propagation analysis implemented, we can extract the receiver type from there
+    * (https://github.com/scala-opt/scala/issues/13).
+    */
+  def memberIsAccessible(
+      memberFlags: Int,
+      memberDeclClass: ClassBType,
+      memberRefClass: ClassBType,
+      from: ClassBType
+  ): Either[OptimizerWarning, Boolean] = {
     // TODO: B3 requires "same run-time package", which seems to be package + classloader (JVMS 5.3.). is the below ok?
     def samePackageAsDestination = memberDeclClass.packageInternalName == from.packageInternalName
     def targetObjectConformsToDestinationClass = false // needs type propagation analysis, see above
@@ -1154,8 +1292,8 @@ abstract class Inliner {
               isStatic || memberRefClass.isSubtypeOf(from).orThrow || from.isSubtypeOf(memberRefClass).orThrow
             }
             Right(
-              (condB2 || samePackageAsDestination /* B3 (protected) */) &&
-              (isStatic || targetObjectConformsToDestinationClass) // (P)
+              (condB2 || samePackageAsDestination /* B3 (protected) */ ) &&
+                (isStatic || targetObjectConformsToDestinationClass) // (P)
             )
           }
 
@@ -1169,19 +1307,21 @@ abstract class Inliner {
 
     classIsAccessible(memberDeclClass, from) match { // B0
       case Right(true) => memberIsAccessibleImpl
-      case r => r
+      case r           => r
     }
   }
 
-  /**
-   * Returns
-   *   - `Right(Nil)` if all instructions can be safely inlined
-   *   - `Right(insns)` if inlining any of `insns` would cause a [[java.lang.IllegalAccessError]]
-   *     when inlined into the `destinationClass`
-   *   - `Left((insn, warning))` if validity of some instruction could not be checked because an
-   *     error occurred
-   */
-  def findIllegalAccess(instructions: InsnList, calleeDeclarationClass: ClassBType, destinationClass: ClassBType): Either[(AbstractInsnNode, OptimizerWarning), List[AbstractInsnNode]] = {
+  /** Returns
+    *   - `Right(Nil)` if all instructions can be safely inlined
+    *   - `Right(insns)` if inlining any of `insns` would cause a [[java.lang.IllegalAccessError]] when inlined into the
+    *     `destinationClass`
+    *   - `Left((insn, warning))` if validity of some instruction could not be checked because an error occurred
+    */
+  def findIllegalAccess(
+      instructions: InsnList,
+      calleeDeclarationClass: ClassBType,
+      destinationClass: ClassBType
+  ): Either[(AbstractInsnNode, OptimizerWarning), List[AbstractInsnNode]] = {
     /*
      * Check if `instruction` can be transplanted to `destinationClass`.
      *
@@ -1194,7 +1334,7 @@ abstract class Inliner {
      * failed.
      */
     def isLegal(instruction: AbstractInsnNode): Either[OptimizerWarning, Boolean] = instruction match {
-      case ti: TypeInsnNode  =>
+      case ti: TypeInsnNode =>
         // NEW, ANEWARRAY, CHECKCAST or INSTANCEOF. For these instructions, the reference
         // "must be a symbolic reference to a class, array, or interface type" (JVMS 6), so
         // it can be an internal name, or a full array descriptor.
@@ -1207,9 +1347,13 @@ abstract class Inliner {
       case fi: FieldInsnNode =>
         val fieldRefClass = classBTypeFromParsedClassfile(fi.owner)
         for {
-          (fieldNode, fieldDeclClassNode) <- byteCodeRepository.fieldNode(fieldRefClass.internalName, fi.name, fi.desc): Either[OptimizerWarning, (FieldNode, InternalName)]
-          fieldDeclClass                  =  classBTypeFromParsedClassfile(fieldDeclClassNode)
-          res                             <- memberIsAccessible(fieldNode.access, fieldDeclClass, fieldRefClass, destinationClass)
+          (fieldNode, fieldDeclClassNode) <- byteCodeRepository.fieldNode(
+            fieldRefClass.internalName,
+            fi.name,
+            fi.desc
+          ): Either[OptimizerWarning, (FieldNode, InternalName)]
+          fieldDeclClass = classBTypeFromParsedClassfile(fieldDeclClassNode)
+          res <- memberIsAccessible(fieldNode.access, fieldDeclClass, fieldRefClass, destinationClass)
         } yield {
           // ensure the result ClassBType is cached (for stack map frame calculation)
           if (res) bTypeForDescriptorFromClassfile(fi.desc)
@@ -1223,7 +1367,12 @@ abstract class Inliner {
           // array methods are accessible
           Right(true)
         } else {
-          def canInlineCall(opcode: Int, methodFlags: Int, methodDeclClass: ClassBType, methodRefClass: ClassBType): Either[OptimizerWarning, Boolean] = {
+          def canInlineCall(
+              opcode: Int,
+              methodFlags: Int,
+              methodDeclClass: ClassBType,
+              methodRefClass: ClassBType
+          ): Either[OptimizerWarning, Boolean] = {
             opcode match {
               case INVOKESPECIAL if mi.name != INSTANCE_CONSTRUCTOR_NAME =>
                 // invokespecial is used for private method calls, super calls and instance constructor calls.
@@ -1237,9 +1386,13 @@ abstract class Inliner {
 
           val methodRefClass = classBTypeFromParsedClassfile(mi.owner)
           for {
-            (methodNode, methodDeclClassNode) <- byteCodeRepository.methodNode(methodRefClass.internalName, mi.name, mi.desc): Either[OptimizerWarning, (MethodNode, InternalName)]
-            methodDeclClass                   =  classBTypeFromParsedClassfile(methodDeclClassNode)
-            res                               <- canInlineCall(mi.getOpcode, methodNode.access, methodDeclClass, methodRefClass)
+            (methodNode, methodDeclClassNode) <- byteCodeRepository.methodNode(
+              methodRefClass.internalName,
+              mi.name,
+              mi.desc
+            ): Either[OptimizerWarning, (MethodNode, InternalName)]
+            methodDeclClass = classBTypeFromParsedClassfile(methodDeclClassNode)
+            res <- canInlineCall(mi.getOpcode, methodNode.access, methodDeclClass, methodRefClass)
           } yield {
             // ensure the result ClassBType is cached (for stack map frame calculation)
             if (res) bTypeForDescriptorFromClassfile(Type.getReturnType(mi.desc).getDescriptor)
@@ -1302,9 +1455,13 @@ abstract class Inliner {
 
         val methodRefClass = classBTypeFromParsedClassfile(implMethod.getOwner)
         for {
-          (methodNode, methodDeclClassNode) <- byteCodeRepository.methodNode(methodRefClass.internalName, implMethod.getName, implMethod.getDesc): Either[OptimizerWarning, (MethodNode, InternalName)]
-          methodDeclClass                   =  classBTypeFromParsedClassfile(methodDeclClassNode)
-          res                               <- memberIsAccessible(methodNode.access, methodDeclClass, methodRefClass, destinationClass)
+          (methodNode, methodDeclClassNode) <- byteCodeRepository.methodNode(
+            methodRefClass.internalName,
+            implMethod.getName,
+            implMethod.getDesc
+          ): Either[OptimizerWarning, (MethodNode, InternalName)]
+          methodDeclClass = classBTypeFromParsedClassfile(methodDeclClassNode)
+          res <- memberIsAccessible(methodNode.access, methodDeclClass, methodRefClass, destinationClass)
         } yield {
           // ensure the result ClassBType is cached (for stack map frame calculation)
           if (res) bTypeForDescriptorFromClassfile(Type.getReturnType(indy.desc).getDescriptor)
@@ -1313,11 +1470,13 @@ abstract class Inliner {
 
       case _: InvokeDynamicInsnNode => Left(UnknownInvokeDynamicInstruction)
 
-      case ci: LdcInsnNode => ci.cst match {
-        case t: asm.Type => classIsAccessible(bTypeForDescriptorOrInternalNameFromClassfile(t.getInternalName), destinationClass)
+      case ci: LdcInsnNode =>
+        ci.cst match {
+          case t: asm.Type =>
+            classIsAccessible(bTypeForDescriptorOrInternalNameFromClassfile(t.getInternalName), destinationClass)
           // TODO: method handle -- check if method accessible?
-        case _           => Right(true)
-      }
+          case _ => Right(true)
+        }
 
       case _ => Right(true)
     }
@@ -1328,8 +1487,8 @@ abstract class Inliner {
       val i = it.next()
       isLegal(i) match {
         case Left(warning) => return Left((i, warning)) // checking isLegal for i failed
-        case Right(false)  => illegalAccess += i        // an illegal instruction was found
-        case _ =>
+        case Right(false)  => illegalAccess += i // an illegal instruction was found
+        case _             =>
       }
     }
     Right(illegalAccess.toList)

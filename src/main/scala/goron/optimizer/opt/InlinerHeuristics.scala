@@ -7,7 +7,15 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{BTypes, BTypesFromClassfile, CompilerSettings, CoreBTypes, LabelNode1, PerRunInit, PostProcessor}
+import goron.optimizer.{
+  BTypes,
+  BTypesFromClassfile,
+  CompilerSettings,
+  CoreBTypes,
+  LabelNode1,
+  PerRunInit,
+  PostProcessor
+}
 
 import java.util.regex.Pattern
 
@@ -30,7 +38,8 @@ abstract class InlinerHeuristics extends PerRunInit {
   def compilerSettings: goron.optimizer.CompilerSettings = bTypes.compilerSettings
   def backendReporting: goron.optimizer.BackendReporting.Reporter = bTypes.backendReporting
 
-  lazy val inlineSourceMatcher: LazyVar[InlineSourceMatcher] = perRunLazy(this)(new InlineSourceMatcher(compilerSettings.optInlineFrom))
+  lazy val inlineSourceMatcher: LazyVar[InlineSourceMatcher] =
+    perRunLazy(this)(new InlineSourceMatcher(compilerSettings.optInlineFrom))
 
   final case class InlineRequest(callsite: Callsite, reason: InlineReason) {
     // non-null if `-Yopt-log-inline` is active, it explains why the callsite was selected for inlining
@@ -52,8 +61,8 @@ abstract class InlinerHeuristics extends PerRunInit {
             def samInfo(i: Int, sam: String, arg: String) = s"the argument for parameter (${param(i)}: $sam) is a $arg"
             val argInfos = for ((i, sam) <- callee.samParamTypes; info <- callsite.argInfos.get(i).iterator) yield {
               val argKind = info match {
-                case FunctionLiteral => "function literal"
-                case ForwardedParam(_) => "parameter of the callsite method"
+                case FunctionLiteral      => "function literal"
+                case ForwardedParam(_)    => "parameter of the callsite method"
                 case StaticallyKnownArray => "" // should not happen, just included to avoid potential crash
               }
               samInfo(i, sam.internalName.split('/').last, argKind)
@@ -82,10 +91,9 @@ abstract class InlinerHeuristics extends PerRunInit {
     inlineSourceMatcher.get.allow(calleeDeclarationClass)
   }
 
-  /**
-   * Select callsites from the call graph that should be inlined, grouped by the containing method.
-   * Cyclic inlining requests are allowed, the inliner will eliminate requests to break cycles.
-   */
+  /** Select callsites from the call graph that should be inlined, grouped by the containing method. Cyclic inlining
+    * requests are allowed, the inliner will eliminate requests to break cycles.
+    */
   def selectCallsitesForInlining: Map[MethodNode, Set[InlineRequest]] = {
     // We should only create inlining requests for callsites being compiled (not for callsites in
     // classes on the classpath). The call graph may contain callsites of classes parsed from the
@@ -93,39 +101,69 @@ abstract class InlinerHeuristics extends PerRunInit {
     // compilingClasses in the byteCodeRepository.
     val compilingMethods = for {
       (classNode, _) <- byteCodeRepository.compilingClasses.valuesIterator
-      methodNode     <- classNode.methods.iterator.asScala
+      methodNode <- classNode.methods.iterator.asScala
     } yield methodNode
 
-    compilingMethods.map(methodNode => {
-      var requests = Set.empty[InlineRequest]
-      callGraph.callsites(methodNode).valuesIterator foreach {
-        case callsite @ Callsite(_, _, _, Right(Callee(callee, _, _, _, _, _, _, callsiteWarning)), _, _, _, pos, _, _) =>
-          inlineRequest(callsite) match {
-            case Some(Right(req)) => requests += req
+    compilingMethods
+      .map(methodNode => {
+        var requests = Set.empty[InlineRequest]
+        callGraph.callsites(methodNode).valuesIterator foreach {
+          case callsite @ Callsite(
+                _,
+                _,
+                _,
+                Right(Callee(callee, _, _, _, _, _, _, callsiteWarning)),
+                _,
+                _,
+                _,
+                pos,
+                _,
+                _
+              ) =>
+            inlineRequest(callsite) match {
+              case Some(Right(req)) => requests += req
 
-            case Some(Left(w)) =>
-              if (w.emitWarning(compilerSettings)) {
-                backendReporting.optimizerWarning(callsite.callsitePosition, w.toString, backendUtils.optimizerWarningSiteString(callsite))
-              }
+              case Some(Left(w)) =>
+                if (w.emitWarning(compilerSettings)) {
+                  backendReporting.optimizerWarning(
+                    callsite.callsitePosition,
+                    w.toString,
+                    backendUtils.optimizerWarningSiteString(callsite)
+                  )
+                }
 
-            case None =>
-              if (callsiteWarning.isDefined && callsiteWarning.get.emitWarning(compilerSettings))
-                backendReporting.optimizerWarning(pos, s"there was a problem determining if method ${callee.name} can be inlined: \n"+ callsiteWarning.get, backendUtils.optimizerWarningSiteString(callsite))
-          }
+              case None =>
+                if (callsiteWarning.isDefined && callsiteWarning.get.emitWarning(compilerSettings))
+                  backendReporting.optimizerWarning(
+                    pos,
+                    s"there was a problem determining if method ${callee.name} can be inlined: \n" + callsiteWarning.get,
+                    backendUtils.optimizerWarningSiteString(callsite)
+                  )
+            }
 
-        case callsite @ Callsite(ins, _, _, Left(warning), _, _, _, pos, _, _) =>
-          if (warning.emitWarning(compilerSettings))
-            backendReporting.optimizerWarning(pos, s"failed to determine if ${ins.name} should be inlined:\n$warning", backendUtils.optimizerWarningSiteString(callsite))
-      }
-      (methodNode, requests)
-    }).filterNot(_._2.isEmpty).toMap
+          case callsite @ Callsite(ins, _, _, Left(warning), _, _, _, pos, _, _) =>
+            if (warning.emitWarning(compilerSettings))
+              backendReporting.optimizerWarning(
+                pos,
+                s"failed to determine if ${ins.name} should be inlined:\n$warning",
+                backendUtils.optimizerWarningSiteString(callsite)
+              )
+        }
+        (methodNode, requests)
+      })
+      .filterNot(_._2.isEmpty)
+      .toMap
   }
 
   val maxSize = 3000
   val mediumSize = 2000
   val smallSize = 1000
 
-  def selectRequestsForMethodSize(method: MethodNode, requests: List[InlineRequest], methodSizes: mutable.Map[MethodNode, Int]): List[InlineRequest] = {
+  def selectRequestsForMethodSize(
+      method: MethodNode,
+      requests: List[InlineRequest],
+      methodSizes: mutable.Map[MethodNode, Int]
+  ): List[InlineRequest] = {
     val byReason = requests.groupBy(_.reason)
     var size = method.instructions.size
     val res = mutable.ListBuffer.empty[InlineRequest]
@@ -156,19 +194,21 @@ abstract class InlinerHeuristics extends PerRunInit {
     res.toList
   }
 
-  /**
-   * Returns the inline request for a callsite if the callsite should be inlined according to the
-   * current heuristics (`-Yopt-inline-heuristics`).
-   *
-   * @return `None` if this callsite should not be inlined according to the active heuristic
-   *         `Some(Left)` if the callsite should be inlined according to the heuristic, but cannot
-   *           be inlined according to an early, incomplete check (see earlyCanInlineCheck)
-   *         `Some(Right)` if the callsite should be inlined (it's still possible that the callsite
-   *           cannot be inlined in the end, for example if it contains instructions that would
-   *           cause an IllegalAccessError in the new class; this is checked in the inliner)
-   */
+  /** Returns the inline request for a callsite if the callsite should be inlined according to the current heuristics
+    * (`-Yopt-inline-heuristics`).
+    *
+    * @return
+    *   `None` if this callsite should not be inlined according to the active heuristic `Some(Left)` if the callsite
+    *   should be inlined according to the heuristic, but cannot be inlined according to an early, incomplete check (see
+    *   earlyCanInlineCheck) `Some(Right)` if the callsite should be inlined (it's still possible that the callsite
+    *   cannot be inlined in the end, for example if it contains instructions that would cause an IllegalAccessError in
+    *   the new class; this is checked in the inliner)
+    */
   def inlineRequest(callsite: Callsite): Option[Either[OptimizerWarning, InlineRequest]] = {
-    def requestIfCanInline(callsite: Callsite, reason: InlineReason): Option[Either[OptimizerWarning, InlineRequest]] = {
+    def requestIfCanInline(
+        callsite: Callsite,
+        reason: InlineReason
+    ): Option[Either[OptimizerWarning, InlineRequest]] = {
       val callee = callsite.callee.get
       if (!callee.safeToInline) {
         if (callsite.isInlineAnnotated && callee.canInlineFromSource) {
@@ -177,18 +217,24 @@ abstract class InlinerHeuristics extends PerRunInit {
           // would attempt to inline `Function1.apply$sp$II`, as it's higher-order (the receiver is
           // a function), and it's concrete (forwards to `apply`). But because it's non-final, it cannot
           // be inlined. So we only create warnings here for methods annotated @inline.
-          Some(Left(CalleeNotFinal(
-            callee.calleeDeclarationClass.internalName,
-            callee.callee.name,
-            callee.callee.desc,
-            callsite.isInlineAnnotated)))
+          Some(
+            Left(
+              CalleeNotFinal(
+                callee.calleeDeclarationClass.internalName,
+                callee.callee.name,
+                callee.callee.desc,
+                callsite.isInlineAnnotated
+              )
+            )
+          )
         } else None
-      } else inliner.earlyCanInlineCheck(callsite) match {
-        case Some(w) =>
-          Some(Left(w))
-        case None =>
-          Some(Right(InlineRequest(callsite, reason)))
-      }
+      } else
+        inliner.earlyCanInlineCheck(callsite) match {
+          case Some(w) =>
+            Some(Left(w))
+          case None =>
+            Some(Right(InlineRequest(callsite, reason)))
+        }
     }
 
     // don't inline into synthetic forwarders (anonfun-adapted methods, bridges, etc). the heuristics
@@ -196,8 +242,15 @@ abstract class InlinerHeuristics extends PerRunInit {
     // or aliases, because otherwise it's too confusing for users looking at generated code, they will
     // write a small test method and think the inliner doesn't work correctly.
     val isGeneratedForwarder =
-      BytecodeUtils.isSyntheticMethod(callsite.callsiteMethod) && backendUtils.looksLikeForwarderOrFactoryOrTrivial(callsite.callsiteMethod, callsite.callsiteClass.internalName, allowPrivateCalls = true) > 0 ||
-        backendUtils.isMixinForwarder(callsite.callsiteMethod, callsite.callsiteClass) // seems mixin forwarders are not synthetic...
+      BytecodeUtils.isSyntheticMethod(callsite.callsiteMethod) && backendUtils.looksLikeForwarderOrFactoryOrTrivial(
+        callsite.callsiteMethod,
+        callsite.callsiteClass.internalName,
+        allowPrivateCalls = true
+      ) > 0 ||
+        backendUtils.isMixinForwarder(
+          callsite.callsiteMethod,
+          callsite.callsiteClass
+        ) // seems mixin forwarders are not synthetic...
 
     if (isGeneratedForwarder) None
     else {
@@ -216,8 +269,8 @@ abstract class InlinerHeuristics extends PerRunInit {
           def shouldInlineHO = Option {
             if (callee.samParamTypes.isEmpty) null
             else {
-              val samArgs = callee.samParamTypes flatMap {
-                case (index, _) => Option.option2Iterable(callsite.argInfos.get(index))
+              val samArgs = callee.samParamTypes flatMap { case (index, _) =>
+                Option.option2Iterable(callsite.argInfos.get(index))
               }
               if (samArgs.isEmpty) null
               else if (samArgs.exists(_ == FunctionLiteral)) HigherOrderWithLiteral
@@ -226,11 +279,19 @@ abstract class InlinerHeuristics extends PerRunInit {
           }
 
           def shouldInlineRefParam =
-            if (Type.getArgumentTypes(callee.callee.desc).exists(tp => coreBTypes.srRefCreateMethods.contains(tp.getInternalName))) Some(RefParam)
+            if (
+              Type
+                .getArgumentTypes(callee.callee.desc)
+                .exists(tp => coreBTypes.srRefCreateMethods.contains(tp.getInternalName))
+            ) Some(RefParam)
             else None
 
           def shouldInlineArrayOp =
-            if (BackendUtils.isRuntimeArrayLoadOrUpdate(callsite.callsiteInstruction) && callsite.argInfos.get(1).contains(StaticallyKnownArray)) Some(KnownArrayOp)
+            if (
+              BackendUtils.isRuntimeArrayLoadOrUpdate(callsite.callsiteInstruction) && callsite.argInfos
+                .get(1)
+                .contains(StaticallyKnownArray)
+            ) Some(KnownArrayOp)
             else None
 
           def shouldInlineForwarder = Option {
@@ -246,33 +307,46 @@ abstract class InlinerHeuristics extends PerRunInit {
                 val css = callGraph.callsites(callee.callee)
                 if (css.sizeIs == 1) css.head._2 else null
               } match {
-                case null => null
+                case null                => null
                 case traitMethodCallsite =>
                   val tmCallee = traitMethodCallsite.callee.get
                   val traitMethodForwarderKind = backendUtils.looksLikeForwarderOrFactoryOrTrivial(
-                    tmCallee.callee, tmCallee.calleeDeclarationClass.internalName, allowPrivateCalls = false)
+                    tmCallee.callee,
+                    tmCallee.calleeDeclarationClass.internalName,
+                    allowPrivateCalls = false
+                  )
                   if (traitMethodForwarderKind > 0) GenericForwarder
                   else null
               }
-            }
-            else {
-              val forwarderKind = backendUtils.looksLikeForwarderOrFactoryOrTrivial(callee.callee, callee.calleeDeclarationClass.internalName, allowPrivateCalls = false)
+            } else {
+              val forwarderKind = backendUtils.looksLikeForwarderOrFactoryOrTrivial(
+                callee.callee,
+                callee.calleeDeclarationClass.internalName,
+                allowPrivateCalls = false
+              )
               if (forwarderKind < 0)
                 null
-              else if (BytecodeUtils.isSyntheticMethod(callee.callee) || backendUtils.isMixinForwarder(callee.callee, callee.calleeDeclarationClass))
+              else if (
+                BytecodeUtils.isSyntheticMethod(callee.callee) || backendUtils.isMixinForwarder(
+                  callee.callee,
+                  callee.calleeDeclarationClass
+                )
+              )
                 SyntheticForwarder
-              else forwarderKind match {
-                case 1 => TrivialMethod
-                case 2 => FactoryMethod
-                case 3 => BoxingForwarder
-                case 4 => GenericForwarder
-              }
+              else
+                forwarderKind match {
+                  case 1 => TrivialMethod
+                  case 2 => FactoryMethod
+                  case 3 => BoxingForwarder
+                  case 4 => GenericForwarder
+                }
             }
           }
 
           if (callsite.isNoInlineAnnotated) None
           else {
-            val reason = shouldInlineAnnotated orElse shouldInlineHO orElse shouldInlineRefParam orElse shouldInlineArrayOp orElse shouldInlineForwarder
+            val reason =
+              shouldInlineAnnotated orElse shouldInlineHO orElse shouldInlineRefParam orElse shouldInlineArrayOp orElse shouldInlineForwarder
             reason.flatMap(r => requestIfCanInline(callsite, r))
           }
       }
@@ -338,7 +412,7 @@ abstract class InlinerHeuristics extends PerRunInit {
   println(classesAndSamNameDesc map {
     case (cls, nme, desc) => s"""("$cls", "$nme$desc")"""
   } mkString ("", ",\n", "\n"))
-  */
+   */
   private val javaSams: Map[String, String] = Map(
     ("java/util/function/BiConsumer", "accept(Ljava/lang/Object;Ljava/lang/Object;)V"),
     ("java/util/function/BiFunction", "apply(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"),
@@ -400,7 +474,10 @@ abstract class InlinerHeuristics extends PerRunInit {
     ("java/util/prefs/PreferenceChangeListener", "preferenceChange(Ljava/util/prefs/PreferenceChangeEvent;)V"),
     ("javafx/animation/Interpolatable", "interpolate(Ljava/lang/Object;D)Ljava/lang/Object;"),
     ("javafx/beans/InvalidationListener", "invalidated(Ljavafx/beans/Observable;)V"),
-    ("javafx/beans/value/ChangeListener", "changed(Ljavafx/beans/value/ObservableValue;Ljava/lang/Object;Ljava/lang/Object;)V"),
+    (
+      "javafx/beans/value/ChangeListener",
+      "changed(Ljavafx/beans/value/ObservableValue;Ljava/lang/Object;Ljava/lang/Object;)V"
+    ),
     ("javafx/collections/ListChangeListener", "onChanged(Ljavafx/collections/ListChangeListener$Change;)V"),
     ("javafx/collections/MapChangeListener", "onChanged(Ljavafx/collections/MapChangeListener$Change;)V"),
     ("javafx/collections/SetChangeListener", "onChanged(Ljavafx/collections/SetChangeListener$Change;)V"),

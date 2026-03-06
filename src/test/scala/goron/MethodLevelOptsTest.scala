@@ -12,8 +12,8 @@ import scala.tools.asm.Opcodes._
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
 
-/** Tests for method-level optimizations (dead stores, nullness, box/unbox, jump simplification).
-  * Adapted from scala.tools.nsc.backend.jvm.opt.MethodLevelOptsTest.
+/** Tests for method-level optimizations (dead stores, nullness, box/unbox, jump simplification). Adapted from
+  * scala.tools.nsc.backend.jvm.opt.MethodLevelOptsTest.
   *
   * Tests compile source with no optimizations, then run through goron's local optimizer.
   */
@@ -21,7 +21,7 @@ class MethodLevelOptsTest extends GoronTesting {
   override def goronConfig = super.goronConfig.copy(
     optInlinerEnabled = false,
     optClosureInvocations = false,
-    optLocalOptimizations = true,
+    optLocalOptimizations = true
   )
 
   test("eliminate empty try") {
@@ -64,8 +64,10 @@ class MethodLevelOptsTest extends GoronTesting {
         |}
       """.stripMargin
     val c = compileAndOptimizeClass(code)
-    assertSameCode(getMethod(c, "t"), List(
-      Op(ACONST_NULL), InvokeVirtual("java/lang/Object", "toString", "()Ljava/lang/String;"), Op(ARETURN)))
+    assertSameCode(
+      getMethod(c, "t"),
+      List(Op(ACONST_NULL), InvokeVirtual("java/lang/Object", "toString", "()Ljava/lang/String;"), Op(ARETURN))
+    )
   }
 
   test("dead store reference elimination") {
@@ -145,8 +147,10 @@ class MethodLevelOptsTest extends GoronTesting {
         |}
       """.stripMargin
     val c = compileAndOptimizeClass(code)
-    assertSameCode(getMethod(c, "t"), List(
-      VarOp(ALOAD, 1), Jump(IFNULL, Label(6)), Op(ICONST_1), Op(IRETURN), Label(6), Op(ICONST_0), Op(IRETURN)))
+    assertSameCode(
+      getMethod(c, "t"),
+      List(VarOp(ALOAD, 1), Jump(IFNULL, Label(6)), Op(ICONST_1), Op(IRETURN), Label(6), Op(ICONST_0), Op(IRETURN))
+    )
   }
 
   test("branch-sensitive nullness") {

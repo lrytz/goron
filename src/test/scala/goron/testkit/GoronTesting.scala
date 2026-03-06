@@ -23,8 +23,8 @@ import goron.testkit.ASMConverters._
 
 /** Test infrastructure for goron optimizer tests.
   *
-  * Provides a Scala compiler (with optimizations disabled) to compile source code strings,
-  * then runs the bytecode through goron's optimizer pipeline.
+  * Provides a Scala compiler (with optimizations disabled) to compile source code strings, then runs the bytecode
+  * through goron's optimizer pipeline.
   */
 trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
 
@@ -34,7 +34,7 @@ trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
     outputJar = "",
     optInlinerEnabled = true,
     optClosureInvocations = true,
-    optLocalOptimizations = true,
+    optLocalOptimizations = true
   )
 
   // Lazily initialized shared compiler instance (no optimizations)
@@ -66,7 +66,8 @@ trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
     val pp = GoronTesting.createPostProcessor(goronConfig)
     val classNodes = classBytes.map { case (_, bytes) =>
       val cn = new ClassNode1()
-      new asm.ClassReader(bytes).accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
+      new asm.ClassReader(bytes)
+        .accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
       cn
     }
 
@@ -104,11 +105,13 @@ trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
     assertSameSummary(method.instructions, expected)
 
   def assertSameSummary(actual: List[Instruction], expected: List[Any]): Unit = {
-    def expectedString = expected.map({
-      case s: String => s""""$s""""
-      case i: Int    => opcodeToString(i, i)
-      case x         => throw new MatchError(x)
-    }).mkString("List(", ", ", ")")
+    def expectedString = expected
+      .map({
+        case s: String => s""""$s""""
+        case i: Int    => opcodeToString(i, i)
+        case x         => throw new MatchError(x)
+      })
+      .mkString("List(", ", ", ")")
     assert(actual.summary == expected, s"\nFound   : ${actual.summaryText}\nExpected: $expectedString")
   }
 
@@ -119,18 +122,24 @@ trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
 
   def assertInvoke(m: Method, receiver: String, method: String): Unit = assertInvoke(m.instructions, receiver, method)
   def assertInvoke(l: List[Instruction], receiver: String, method: String): Unit = {
-    assert(l.exists {
-      case Invoke(_, `receiver`, `method`, _, _) => true
-      case _ => false
-    }, l.mkString("\n"))
+    assert(
+      l.exists {
+        case Invoke(_, `receiver`, `method`, _, _) => true
+        case _                                     => false
+      },
+      l.mkString("\n")
+    )
   }
 
   def assertDoesNotInvoke(m: Method, method: String): Unit = assertDoesNotInvoke(m.instructions, method)
   def assertDoesNotInvoke(l: List[Instruction], method: String): Unit = {
-    assert(!l.exists {
-      case i: Invoke => i.name == method
-      case _ => false
-    }, l.mkString("\n"))
+    assert(
+      !l.exists {
+        case i: Invoke => i.name == method
+        case _         => false
+      },
+      l.mkString("\n")
+    )
   }
 
   def assertInvokedMethods(m: Method, expected: List[String]): Unit = assertInvokedMethods(m.instructions, expected)
@@ -149,8 +158,7 @@ trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
   // --- ClassNode / MethodNode helpers ---
 
   def findClass(cs: List[ClassNode], name: String): ClassNode =
-    cs.find(_.name == name).getOrElse(
-      throw new AssertionError(s"Class $name not found in ${cs.map(_.name)}"))
+    cs.find(_.name == name).getOrElse(throw new AssertionError(s"Class $name not found in ${cs.map(_.name)}"))
 
   def getAsmMethods(c: ClassNode, p: String => Boolean): List[MethodNode] =
     c.methods.iterator.asScala.filter(m => p(m.name)).toList.sortBy(_.name)
@@ -160,7 +168,10 @@ trait GoronTesting extends munit.FunSuite with GoronIntegrationHelpers {
 
   def getAsmMethod(c: ClassNode, name: String): MethodNode = {
     val methods = getAsmMethods(c, name)
-    assert(methods.size == 1, s"Expected 1 method '$name', found ${methods.size} in ${getAsmMethods(c, _ => true).map(_.name)}")
+    assert(
+      methods.size == 1,
+      s"Expected 1 method '$name', found ${methods.size} in ${getAsmMethods(c, _ => true).map(_.name)}"
+    )
     methods.head
   }
 
@@ -212,18 +223,19 @@ class ScalacCompiler(val global: Global) {
 /** Helpers for integration tests that run goron over user classes + scala-library. */
 trait GoronIntegrationHelpers { self: GoronTesting =>
 
-  /** Compile user code, combine with scala-library, and run the full goron pipeline.
-    * Returns surviving ClassNodes after DCE + optimization + DCE.
+  /** Compile user code, combine with scala-library, and run the full goron pipeline. Returns surviving ClassNodes after
+    * DCE + optimization + DCE.
     */
   def compileAndRunFullPipeline(
-    code: String,
-    entryPoints: Set[String],
-    config: GoronConfig = goronConfig,
+      code: String,
+      entryPoints: Set[String],
+      config: GoronConfig = goronConfig
   ): List[ClassNode] = {
     val userBytes = compileToBytes(code)
     val userNodes = userBytes.map { case (_, bytes) =>
       val cn = new ClassNode1()
-      new asm.ClassReader(bytes).accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
+      new asm.ClassReader(bytes)
+        .accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
       cn
     }
 
@@ -271,8 +283,8 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
   def survivingClassNames(classes: List[ClassNode]): Set[String] =
     classes.map(_.name).toSet
 
-  /** Serialize surviving ClassNodes to bytes, invoke the static main method via a
-    * classloader, and return captured stdout.
+  /** Serialize surviving ClassNodes to bytes, invoke the static main method via a classloader, and return captured
+    * stdout.
     */
   def runMain(survivors: List[ClassNode], mainClass: String = "Main"): String = {
     val pp = GoronTesting.createPostProcessor(goronConfig)
@@ -295,7 +307,7 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
         val already = findLoadedClass(name)
         if (already != null) return already
         classBytes.get(name) match {
-          case Some(bytes) => defineClass(name, bytes, 0, bytes.length)
+          case Some(bytes)                       => defineClass(name, bytes, 0, bytes.length)
           case None if name.startsWith("scala.") =>
             // Scala-library class not in survivors — it was eliminated.
             // Block it so we detect missing DCE dependencies.
@@ -308,12 +320,13 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
 
     val mainCls = cl.loadClass(mainClass)
     // Static forwarders: main(String[]) or main() (no-arg)
-    val (mainMethod, mainArgs) = try {
-      (mainCls.getMethod("main", classOf[Array[String]]), Array[AnyRef](Array.empty[String]))
-    } catch {
-      case _: NoSuchMethodException =>
-        (mainCls.getMethod("main"), Array.empty[AnyRef])
-    }
+    val (mainMethod, mainArgs) =
+      try {
+        (mainCls.getMethod("main", classOf[Array[String]]), Array[AnyRef](Array.empty[String]))
+      } catch {
+        case _: NoSuchMethodException =>
+          (mainCls.getMethod("main"), Array.empty[AnyRef])
+      }
 
     val baos = new java.io.ByteArrayOutputStream()
     val oldOut = System.out
@@ -329,8 +342,11 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
   }
 
   /** Like runMain, but also records which classes are loaded into the provided set. */
-  def runMainTracking(survivors: List[ClassNode], mainClass: String = "Main",
-      loadedClasses: java.util.Set[String]): String = {
+  def runMainTracking(
+      survivors: List[ClassNode],
+      mainClass: String = "Main",
+      loadedClasses: java.util.Set[String]
+  ): String = {
     val pp = GoronTesting.createPostProcessor(goronConfig)
     for (cn <- survivors) pp.byteCodeRepository.add(cn, Some("goron-test"))
 
@@ -346,7 +362,7 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
         if (already != null) return already
         loadedClasses.add(name)
         classBytes.get(name) match {
-          case Some(bytes) => defineClass(name, bytes, 0, bytes.length)
+          case Some(bytes)                       => defineClass(name, bytes, 0, bytes.length)
           case None if name.startsWith("scala.") =>
             throw new ClassNotFoundException(s"$name was eliminated by DCE and is not available")
           case None =>
@@ -356,12 +372,13 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     }
 
     val mainCls = cl.loadClass(mainClass)
-    val (mainMethod, mainArgs) = try {
-      (mainCls.getMethod("main", classOf[Array[String]]), Array[AnyRef](Array.empty[String]))
-    } catch {
-      case _: NoSuchMethodException =>
-        (mainCls.getMethod("main"), Array.empty[AnyRef])
-    }
+    val (mainMethod, mainArgs) =
+      try {
+        (mainCls.getMethod("main", classOf[Array[String]]), Array[AnyRef](Array.empty[String]))
+      } catch {
+        case _: NoSuchMethodException =>
+          (mainCls.getMethod("main"), Array.empty[AnyRef])
+      }
 
     val baos = new java.io.ByteArrayOutputStream()
     val oldOut = System.out
@@ -378,27 +395,33 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
 }
 
 object GoronTesting {
+
   /** Find scala-library.jar from the classloader URL chain. */
   def findScalaLibraryJar(): String = {
     import java.net.URLClassLoader
-    val urls = Iterator.iterate(getClass.getClassLoader: ClassLoader)(_.getParent)
+    val urls = Iterator
+      .iterate(getClass.getClassLoader: ClassLoader)(_.getParent)
       .takeWhile(_ != null)
       .flatMap {
         case ucl: URLClassLoader => ucl.getURLs.iterator
-        case _ => Iterator.empty
-      }.toList
+        case _                   => Iterator.empty
+      }
+      .toList
 
-    val jarUrl = urls.find { u =>
-      val path = u.getPath
-      path.contains("scala-library") && path.endsWith(".jar")
-    }.getOrElse {
-      // Fallback: search java.class.path
-      val cp = System.getProperty("java.class.path", "")
-      val entry = cp.split(java.io.File.pathSeparator).find(p =>
-        p.contains("scala-library") && p.endsWith(".jar")
-      ).getOrElse(throw new RuntimeException("Cannot find scala-library.jar on classpath"))
-      new java.io.File(entry).toURI.toURL
-    }
+    val jarUrl = urls
+      .find { u =>
+        val path = u.getPath
+        path.contains("scala-library") && path.endsWith(".jar")
+      }
+      .getOrElse {
+        // Fallback: search java.class.path
+        val cp = System.getProperty("java.class.path", "")
+        val entry = cp
+          .split(java.io.File.pathSeparator)
+          .find(p => p.contains("scala-library") && p.endsWith(".jar"))
+          .getOrElse(throw new RuntimeException("Cannot find scala-library.jar on classpath"))
+        new java.io.File(entry).toURI.toURL
+      }
     new java.io.File(jarUrl.toURI).getAbsolutePath
   }
 
@@ -406,11 +429,18 @@ object GoronTesting {
   lazy val scalaLibraryNodes: List[ClassNode] = {
     val jarPath = findScalaLibraryJar()
     val entries = JarIO.readJar(jarPath)
-    entries.filter(_.isClass).map { entry =>
-      val cn = new ClassNode1()
-      new asm.ClassReader(entry.bytes).accept(cn, Array[asm.Attribute](InlineInfoAttributePrototype), asm.ClassReader.SKIP_FRAMES)
-      cn
-    }.toList
+    entries
+      .filter(_.isClass)
+      .map { entry =>
+        val cn = new ClassNode1()
+        new asm.ClassReader(entry.bytes).accept(
+          cn,
+          Array[asm.Attribute](InlineInfoAttributePrototype),
+          asm.ClassReader.SKIP_FRAMES
+        )
+        cn
+      }
+      .toList
   }
 
   def newScalac(extraArgs: String = ""): ScalacCompiler = {
@@ -431,10 +461,14 @@ object GoronTesting {
   /** Extract classpath entries from a classloader by walking its parent chain. */
   private def classPathFromClassLoader(cl: ClassLoader): String = {
     import java.net.URLClassLoader
-    val urls = Iterator.iterate(cl)(_.getParent).takeWhile(_ != null).flatMap {
-      case ucl: URLClassLoader => ucl.getURLs.iterator
-      case _ => Iterator.empty
-    }.toList
+    val urls = Iterator
+      .iterate(cl)(_.getParent)
+      .takeWhile(_ != null)
+      .flatMap {
+        case ucl: URLClassLoader => ucl.getURLs.iterator
+        case _                   => Iterator.empty
+      }
+      .toList
     if (urls.nonEmpty)
       urls.map(u => new java.io.File(u.toURI).getAbsolutePath).mkString(java.io.File.pathSeparator)
     else

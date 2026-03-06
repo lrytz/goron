@@ -18,14 +18,13 @@ import goron.optimizer.BTypes.{InlineInfo, InternalName}
 import goron.optimizer.BackendReporting._
 import goron.optimizer.opt._
 
-/**
- * The BTypes component defines The BType class hierarchy. A BType stores all type information
- * that is required after building the ASM nodes. This includes optimizations, generation of
- * InnerClass attributes and generation of stack map frames.
- *
- * The representation is immutable and independent of the compiler data structures, hence it can
- * be queried by concurrent threads.
- */
+/** The BTypes component defines The BType class hierarchy. A BType stores all type information that is required after
+  * building the ASM nodes. This includes optimizations, generation of InnerClass attributes and generation of stack map
+  * frames.
+  *
+  * The representation is immutable and independent of the compiler data structures, hence it can be queried by
+  * concurrent threads.
+  */
 abstract class BTypes {
   val compilerSettings: CompilerSettings
   val classpath: goron.Classpath
@@ -37,13 +36,12 @@ abstract class BTypes {
   val coreBTypes: CoreBTypes { val bTypes: BTypes.this.type }
   import coreBTypes._
 
-  /**
-   * Every ClassBType is cached on construction and accessible through this method.
-   *
-   * The cache is used when computing stack map frames. The asm.ClassWriter invokes the method
-   * `getCommonSuperClass`. In this method we need to obtain the ClassBType for a given internal
-   * name. The method assumes that every class type that appears in the bytecode exists in the map
-   */
+  /** Every ClassBType is cached on construction and accessible through this method.
+    *
+    * The cache is used when computing stack map frames. The asm.ClassWriter invokes the method `getCommonSuperClass`.
+    * In this method we need to obtain the ClassBType for a given internal name. The method assumes that every class
+    * type that appears in the bytecode exists in the map
+    */
   // OPT: not returning Option[ClassBType] because the Some allocation shows up as a hotspot
   def cachedClassBType(internalName: InternalName): ClassBType =
     classBTypeCache.get(internalName)
@@ -60,44 +58,44 @@ abstract class BTypes {
   sealed abstract class BType {
     override def toString: String = BTypeExporter.btypeToString(this)
 
-    /**
-     * @return The Java descriptor of this type. Examples:
-     *  - int: I
-     *  - java.lang.String: Ljava/lang/String;
-     *  - int[]: [I
-     *  - Object m(String s, double d): (Ljava/lang/String;D)Ljava/lang/Object;
-     */
+    /** @return
+      *   The Java descriptor of this type. Examples:
+      *   - int: I
+      *   - java.lang.String: Ljava/lang/String;
+      *   - int[]: [I
+      *   - Object m(String s, double d): (Ljava/lang/String;D)Ljava/lang/Object;
+      */
     final def descriptor = toString
 
-    /**
-     * @return 0 for void, 2 for long and double, 1 otherwise
-     */
+    /** @return
+      *   0 for void, 2 for long and double, 1 otherwise
+      */
     final def size: Int = this match {
-      case UNIT => 0
+      case UNIT          => 0
       case LONG | DOUBLE => 2
-      case _ => 1
+      case _             => 1
     }
 
     final def isPrimitive: Boolean = this.isInstanceOf[PrimitiveBType]
-    final def isRef: Boolean       = this.isInstanceOf[RefBType]
-    final def isArray: Boolean     = this.isInstanceOf[ArrayBType]
-    final def isClass: Boolean     = this.isInstanceOf[ClassBType]
-    final def isMethod: Boolean    = this.isInstanceOf[MethodBType]
+    final def isRef: Boolean = this.isInstanceOf[RefBType]
+    final def isArray: Boolean = this.isInstanceOf[ArrayBType]
+    final def isClass: Boolean = this.isInstanceOf[ClassBType]
+    final def isMethod: Boolean = this.isInstanceOf[MethodBType]
 
     final def isNonVoidPrimitiveType = isPrimitive && this != UNIT
 
-    final def isNullType             = this == srNullRef
-    final def isNothingType          = this == srNothingRef
+    final def isNullType = this == srNullRef
+    final def isNothingType = this == srNothingRef
 
     final def isBoxed = this.isClass && boxedClasses(this.asClassBType)
 
     final def isIntSizedType = this == BOOL || this == CHAR || this == BYTE ||
-                               this == SHORT || this == INT
+      this == SHORT || this == INT
     final def isIntegralType = this == INT || this == BYTE || this == LONG ||
-                               this == CHAR || this == SHORT
-    final def isRealType     = this == FLOAT || this == DOUBLE
-    final def isNumericType  = isIntegralType || isRealType
-    final def isWideType     = size == 2
+      this == CHAR || this == SHORT
+    final def isRealType = this == FLOAT || this == DOUBLE
+    final def isNumericType = isIntegralType || isRealType
+    final def isWideType = size == 2
 
     /*
      * Subtype check `this <:< other` on BTypes that takes into account the JVM built-in numeric
@@ -111,20 +109,21 @@ abstract class BTypes {
       this match {
         case ArrayBType(component) =>
           if (other == ObjectRef || other == jlCloneableRef || other == jiSerializableRef) true
-          else other match {
-            case ArrayBType(otherComponent) =>
-              // Array[Short]().isInstanceOf[Array[Int]] is false
-              // but Array[String]().isInstanceOf[Array[Object]] is true
-              if (component.isPrimitive || otherComponent.isPrimitive) component == otherComponent
-              else component.conformsTo(otherComponent).orThrow
-            case _ => false
-          }
+          else
+            other match {
+              case ArrayBType(otherComponent) =>
+                // Array[Short]().isInstanceOf[Array[Int]] is false
+                // but Array[String]().isInstanceOf[Array[Object]] is true
+                if (component.isPrimitive || otherComponent.isPrimitive) component == otherComponent
+                else component.conformsTo(otherComponent).orThrow
+              case _ => false
+            }
 
         case classType: ClassBType =>
           // Quick test for ObjectRef to make a common case fast
           other == ObjectRef || (other match {
             case otherClassType: ClassBType => classType.isSubtypeOf(otherClassType).orThrow
-            case _ => false
+            case _                          => false
           })
 
         case _ =>
@@ -134,25 +133,23 @@ abstract class BTypes {
           // note that for primitive arrays, Array[Short]().isInstanceOf[Array[Int]] is false.
           this == other || ((this, other) match {
             case (BOOL, BYTE | SHORT | INT) => true
-            case (BYTE, SHORT | INT) => true
-            case (SHORT, INT) => true
-            case (CHAR, INT) => true
-            case _ => false
+            case (BYTE, SHORT | INT)        => true
+            case (SHORT, INT)               => true
+            case (CHAR, INT)                => true
+            case _                          => false
           })
       }
     }))
 
-    /**
-     * Compute the upper bound of two types.
-     * Takes promotions of numeric primitives into account.
-     */
+    /** Compute the upper bound of two types. Takes promotions of numeric primitives into account.
+      */
     final def maxType(other: BType): BType = this match {
       case pt: PrimitiveBType => pt.maxValueType(other)
 
       case _: ArrayBType | _: ClassBType =>
-        if (isNothingType)       return other
+        if (isNothingType) return other
         if (other.isNothingType) return this
-        if (this == other)       return this
+        if (this == other) return this
 
         assert(other.isRef, s"Cannot compute maxType: $this, $other")
         // Approximate `lub`. The common type of two references is always ObjectReference.
@@ -162,10 +159,9 @@ abstract class BTypes {
         assertionError(s"unexpected method type when computing maxType: $this")
     }
 
-    /**
-     * See documentation of [[typedOpcode]].
-     * The numbers are taken from asm.Type.VOID_TYPE ff., the values are those shifted by << 8.
-     */
+    /** See documentation of [[typedOpcode]]. The numbers are taken from asm.Type.VOID_TYPE ff., the values are those
+      * shifted by << 8.
+      */
     private def loadStoreOpcodeOffset: Int = this match {
       case UNIT | INT  => 0
       case BOOL | BYTE => 5
@@ -177,29 +173,27 @@ abstract class BTypes {
       case _           => 4
     }
 
-    /**
-     * See documentation of [[typedOpcode]].
-     * The numbers are taken from asm.Type.VOID_TYPE ff., the values are those shifted by << 16.
-     */
+    /** See documentation of [[typedOpcode]]. The numbers are taken from asm.Type.VOID_TYPE ff., the values are those
+      * shifted by << 16.
+      */
     private def typedOpcodeOffset: Int = this match {
-      case UNIT                               => 5
-      case BOOL | CHAR | BYTE | SHORT | INT   => 0
-      case FLOAT                              => 2
-      case LONG                               => 1
-      case DOUBLE                             => 3
-      case _                                  => 4
+      case UNIT                             => 5
+      case BOOL | CHAR | BYTE | SHORT | INT => 0
+      case FLOAT                            => 2
+      case LONG                             => 1
+      case DOUBLE                           => 3
+      case _                                => 4
     }
 
-    /**
-     * Some JVM opcodes have typed variants. This method returns the correct opcode according to
-     * the type.
-     *
-     * @param opcode A JVM instruction opcode. This opcode must be one of ILOAD, ISTORE, IALOAD,
-     *               IASTORE, IADD, ISUB, IMUL, IDIV, IREM, INEG, ISHL, ISHR, IUSHR, IAND, IOR
-     *               IXOR and IRETURN.
-     * @return The opcode adapted to this java type. For example, if this type is `float` and
-     *         `opcode` is `IRETURN`, this method returns `FRETURN`.
-     */
+    /** Some JVM opcodes have typed variants. This method returns the correct opcode according to the type.
+      *
+      * @param opcode
+      *   A JVM instruction opcode. This opcode must be one of ILOAD, ISTORE, IALOAD, IASTORE, IADD, ISUB, IMUL, IDIV,
+      *   IREM, INEG, ISHL, ISHR, IUSHR, IAND, IOR IXOR and IRETURN.
+      * @return
+      *   The opcode adapted to this java type. For example, if this type is `float` and `opcode` is `IRETURN`, this
+      *   method returns `FRETURN`.
+      */
     final def typedOpcode(opcode: Int): Int = {
       if (opcode == Opcodes.IALOAD || opcode == Opcodes.IASTORE)
         opcode + loadStoreOpcodeOffset
@@ -207,17 +201,16 @@ abstract class BTypes {
         opcode + typedOpcodeOffset
     }
 
-    /**
-     * The asm.Type corresponding to this BType.
-     *
-     * Note about asm.Type.getObjectType (*): For class types, the method expects the internal
-     * name, i.e. without the surrounding 'L' and ';'. For array types on the other hand, the
-     * method expects a full descriptor, for example "[Ljava/lang/String;".
-     *
-     * See method asm.Type.getType that creates a asm.Type from a type descriptor
-     *  - for an OBJECT type, the 'L' and ';' are not part of the range of the created Type
-     *  - for an ARRAY type, the full descriptor is part of the range
-     */
+    /** The asm.Type corresponding to this BType.
+      *
+      * Note about asm.Type.getObjectType (*): For class types, the method expects the internal name, i.e. without the
+      * surrounding 'L' and ';'. For array types on the other hand, the method expects a full descriptor, for example
+      * "[Ljava/lang/String;".
+      *
+      * See method asm.Type.getType that creates a asm.Type from a type descriptor
+      *   - for an OBJECT type, the 'L' and ';' are not part of the range of the created Type
+      *   - for an ARRAY type, the full descriptor is part of the range
+      */
     def toASMType: asm.Type = this match {
       case p: PrimitiveBType        => p.asmType
       case ClassBType(internalName) => asm.Type.getObjectType(internalName) // see (*) above
@@ -225,22 +218,20 @@ abstract class BTypes {
       case m: MethodBType           => asm.Type.getMethodType(m.descriptor)
     }
 
-    def asRefBType       : RefBType       = this.asInstanceOf[RefBType]
-    def asArrayBType     : ArrayBType     = this.asInstanceOf[ArrayBType]
-    def asClassBType     : ClassBType     = this.asInstanceOf[ClassBType]
-    def asPrimitiveBType : PrimitiveBType = this.asInstanceOf[PrimitiveBType]
+    def asRefBType: RefBType = this.asInstanceOf[RefBType]
+    def asArrayBType: ArrayBType = this.asInstanceOf[ArrayBType]
+    def asClassBType: ClassBType = this.asInstanceOf[ClassBType]
+    def asPrimitiveBType: PrimitiveBType = this.asInstanceOf[PrimitiveBType]
   }
 
   sealed abstract class PrimitiveBType(val desc: Char, val asmType: asm.Type) extends BType {
     override val toString: String = desc.toString // OPT avoid StringBuilder
 
-    /**
-     * The upper bound of two primitive types. The `other` type has to be either a primitive
-     * type or Nothing.
-     *
-     * The maxValueType of (Char, Byte) and of (Char, Short) is Int, to encompass the negative
-     * values of Byte and Short. See ticket #2087.
-     */
+    /** The upper bound of two primitive types. The `other` type has to be either a primitive type or Nothing.
+      *
+      * The maxValueType of (Char, Byte) and of (Char, Short) is Int, to encompass the negative values of Byte and
+      * Short. See ticket #2087.
+      */
     final def maxValueType(other: BType): BType = {
 
       def uncomparable: Nothing = assertionError(s"Cannot compute maxValueType: $this, $other")
@@ -248,27 +239,27 @@ abstract class BTypes {
       if (!other.isPrimitive && !other.isNothingType) uncomparable
 
       if (other.isNothingType) return this
-      if (this == other)       return this
+      if (this == other) return this
 
       this match {
         case BYTE =>
-          if (other == CHAR)            INT
+          if (other == CHAR) INT
           else if (other.isNumericType) other
-          else                          uncomparable
+          else uncomparable
 
         case SHORT =>
           other match {
-            case BYTE                          => SHORT
-            case CHAR                          => INT
-            case INT  | LONG  | FLOAT | DOUBLE => other
-            case _                             => uncomparable
+            case BYTE                        => SHORT
+            case CHAR                        => INT
+            case INT | LONG | FLOAT | DOUBLE => other
+            case _                           => uncomparable
           }
 
         case CHAR =>
           other match {
-            case BYTE | SHORT                 => INT
-            case INT  | LONG | FLOAT | DOUBLE => other
-            case _                            => uncomparable
+            case BYTE | SHORT                => INT
+            case INT | LONG | FLOAT | DOUBLE => other
+            case _                           => uncomparable
           }
 
         case INT =>
@@ -287,41 +278,40 @@ abstract class BTypes {
           }
 
         case FLOAT =>
-          if (other == DOUBLE)          DOUBLE
+          if (other == DOUBLE) DOUBLE
           else if (other.isNumericType) FLOAT
-          else                          uncomparable
+          else uncomparable
 
         case DOUBLE =>
           if (other.isNumericType) DOUBLE
-          else                     uncomparable
+          else uncomparable
 
         case UNIT | BOOL => uncomparable
       }
     }
   }
 
-  case object UNIT   extends PrimitiveBType('V', asm.Type.VOID_TYPE)
-  case object BOOL   extends PrimitiveBType('Z', asm.Type.BOOLEAN_TYPE)
-  case object CHAR   extends PrimitiveBType('C', asm.Type.CHAR_TYPE)
-  case object BYTE   extends PrimitiveBType('B', asm.Type.BYTE_TYPE)
-  case object SHORT  extends PrimitiveBType('S', asm.Type.SHORT_TYPE)
-  case object INT    extends PrimitiveBType('I', asm.Type.INT_TYPE)
-  case object FLOAT  extends PrimitiveBType('F', asm.Type.FLOAT_TYPE)
-  case object LONG   extends PrimitiveBType('J', asm.Type.LONG_TYPE)
+  case object UNIT extends PrimitiveBType('V', asm.Type.VOID_TYPE)
+  case object BOOL extends PrimitiveBType('Z', asm.Type.BOOLEAN_TYPE)
+  case object CHAR extends PrimitiveBType('C', asm.Type.CHAR_TYPE)
+  case object BYTE extends PrimitiveBType('B', asm.Type.BYTE_TYPE)
+  case object SHORT extends PrimitiveBType('S', asm.Type.SHORT_TYPE)
+  case object INT extends PrimitiveBType('I', asm.Type.INT_TYPE)
+  case object FLOAT extends PrimitiveBType('F', asm.Type.FLOAT_TYPE)
+  case object LONG extends PrimitiveBType('J', asm.Type.LONG_TYPE)
   case object DOUBLE extends PrimitiveBType('D', asm.Type.DOUBLE_TYPE)
 
   sealed abstract class RefBType extends BType {
-    /**
-     * The class or array type of this reference type. Used for ANEWARRAY, MULTIANEWARRAY,
-     * INSTANCEOF and CHECKCAST instructions. Also used for emitting invokevirtual calls to
-     * (a: Array[T]).clone() for any T, see genApply.
-     *
-     * In contrast to the descriptor, this string does not contain the surrounding 'L' and ';' for
-     * class types, for example "java/lang/String".
-     * However, for array types, the full descriptor is used, for example "[Ljava/lang/String;".
-     *
-     * This can be verified for example using javap or ASMifier.
-     */
+
+    /** The class or array type of this reference type. Used for ANEWARRAY, MULTIANEWARRAY, INSTANCEOF and CHECKCAST
+      * instructions. Also used for emitting invokevirtual calls to (a: Array[T]).clone() for any T, see genApply.
+      *
+      * In contrast to the descriptor, this string does not contain the surrounding 'L' and ';' for class types, for
+      * example "java/lang/String". However, for array types, the full descriptor is used, for example
+      * "[Ljava/lang/String;".
+      *
+      * This can be verified for example using javap or ASMifier.
+      */
     def classOrArrayType: String = this match {
       case ClassBType(internalName) => internalName
       case a: ArrayBType            => a.descriptor
@@ -563,34 +553,32 @@ abstract class BTypes {
    * TODO: innerclass attributes on mirror class, bean info class
    */
 
-  /**
-   * A ClassBType represents a class or interface type. The necessary information to build a
-   * ClassBType is extracted from compiler symbols and types, see BTypesFromSymbols.
-   *
-   * The `info` field contains either the class information on an error message why the info could
-   * not be computed. There are two reasons for an erroneous info:
-   *   1. The ClassBType was built from a class symbol that stems from a java source file, and the
-   *      symbol's type could not be completed successfully (scala/bug#9111)
-   *   2. The ClassBType should be built from a classfile, but the class could not be found on the
-   *      compilation classpath.
-   *
-   * Note that all ClassBTypes required in a non-optimized run are built during code generation from
-   * the class symbols referenced by the ASTs, so they have a valid info. Therefore the backend
-   * often invokes `info.get` (which asserts the info to exist) when reading data from the ClassBType.
-   *
-   * The inliner on the other hand uses ClassBTypes that are built from classfiles, which may have
-   * a missing info. In order not to crash the compiler unnecessarily, the inliner does not force
-   * infos using `get`, but it reports inliner warnings for missing infos that prevent inlining.
-   */
-  sealed abstract class ClassBType protected(val internalName: InternalName) extends RefBType {
+  /** A ClassBType represents a class or interface type. The necessary information to build a ClassBType is extracted
+    * from compiler symbols and types, see BTypesFromSymbols.
+    *
+    * The `info` field contains either the class information on an error message why the info could not be computed.
+    * There are two reasons for an erroneous info:
+    *   1. The ClassBType was built from a class symbol that stems from a java source file, and the symbol's type could
+    *      not be completed successfully (scala/bug#9111)
+    *   2. The ClassBType should be built from a classfile, but the class could not be found on the compilation
+    *      classpath.
+    *
+    * Note that all ClassBTypes required in a non-optimized run are built during code generation from the class symbols
+    * referenced by the ASTs, so they have a valid info. Therefore the backend often invokes `info.get` (which asserts
+    * the info to exist) when reading data from the ClassBType.
+    *
+    * The inliner on the other hand uses ClassBTypes that are built from classfiles, which may have a missing info. In
+    * order not to crash the compiler unnecessarily, the inliner does not force infos using `get`, but it reports
+    * inliner warnings for missing infos that prevent inlining.
+    */
+  sealed abstract class ClassBType protected (val internalName: InternalName) extends RefBType {
     def fromSymbol: Boolean
-    /**
-     * Write-once variable allows initializing a cyclic graph of infos. This is required for
-     * nested classes. Example: for the definition `class A { class B }` we have
-     *
-     *   B.info.nestedInfo.outerClass == A
-     *   A.info.nestedClasses contains B
-     */
+
+    /** Write-once variable allows initializing a cyclic graph of infos. This is required for nested classes. Example:
+      * for the definition `class A { class B }` we have
+      *
+      * B.info.nestedInfo.outerClass == A A.info.nestedClasses contains B
+      */
     // volatile is required to ensure no early initialisation in apply
     // like classic double checked lock in java
     @volatile private var _info: Either[NoClassBTypeInfo, ClassInfo] = null
@@ -618,8 +606,9 @@ abstract class BTypes {
       assert(!ClassBType.isInternalPhantomType(internalName), s"Cannot create ClassBType for phantom type $this")
 
       assert(
-        if (info.get.superClass.isEmpty) { isJLO(this) || (isCompilingPrimitive && ClassBType.hasNoSuper(internalName)) }
-        else if (isInterface.get) isJLO(info.get.superClass.get)
+        if (info.get.superClass.isEmpty) {
+          isJLO(this) || (isCompilingPrimitive && ClassBType.hasNoSuper(internalName))
+        } else if (isInterface.get) isJLO(info.get.superClass.get)
         else !isJLO(this) && ifInit(info.get.superClass.get)(!_.isInterface.get),
         s"Invalid superClass in $this: ${info.get.superClass}"
       )
@@ -648,9 +637,8 @@ abstract class BTypes {
       case Invalid(noInfo: NoClassBTypeInfo) => Left(noInfo)
     }
 
-    /**
-     * The prefix of the internal name until the last '/', or the empty string.
-     */
+    /** The prefix of the internal name until the last '/', or the empty string.
+      */
     def packageInternalName: String = {
       val name = internalName
       name.lastIndexOf('/') match {
@@ -672,30 +660,29 @@ abstract class BTypes {
     }
 
     def innerClassAttributeEntry: Either[NoClassBTypeInfo, Option[InnerClassEntry]] =
-      for (i <- info) yield
-        i.nestedInfo.force.map {
-          case NestedInfo(_, outerName, innerName, isStaticNestedClass, enteringTyperPrivate) =>
-            var flags = i.flags
-            if (enteringTyperPrivate)
-              flags = (flags & ~Opcodes.ACC_PUBLIC) | Opcodes.ACC_PRIVATE
-            // for use of ACC_STATIC in InnerClasses, see `InnerClasses and EnclosingMethod attributes` above
-            if (isStaticNestedClass)
-              flags |= Opcodes.ACC_STATIC
-            else
-              flags &= ~Opcodes.ACC_STATIC
-            // Kotlin interop (scala/bug#13110)
-            if ((flags & Opcodes.ACC_ABSTRACT) != 0)
-              flags &= ~Opcodes.ACC_FINAL
-            // BCodeHelpers.INNER_CLASSES_FLAGS = ACC_PUBLIC | ACC_PRIVATE | ACC_PROTECTED | ACC_STATIC | ACC_FINAL | ACC_INTERFACE | ACC_ABSTRACT | ACC_SYNTHETIC | ACC_ANNOTATION | ACC_ENUM
-            flags &= (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SYNTHETIC | Opcodes.ACC_ANNOTATION | Opcodes.ACC_ENUM)
+      for (i <- info) yield i.nestedInfo.force.map {
+        case NestedInfo(_, outerName, innerName, isStaticNestedClass, enteringTyperPrivate) =>
+          var flags = i.flags
+          if (enteringTyperPrivate)
+            flags = (flags & ~Opcodes.ACC_PUBLIC) | Opcodes.ACC_PRIVATE
+          // for use of ACC_STATIC in InnerClasses, see `InnerClasses and EnclosingMethod attributes` above
+          if (isStaticNestedClass)
+            flags |= Opcodes.ACC_STATIC
+          else
+            flags &= ~Opcodes.ACC_STATIC
+          // Kotlin interop (scala/bug#13110)
+          if ((flags & Opcodes.ACC_ABSTRACT) != 0)
+            flags &= ~Opcodes.ACC_FINAL
+          // BCodeHelpers.INNER_CLASSES_FLAGS = ACC_PUBLIC | ACC_PRIVATE | ACC_PROTECTED | ACC_STATIC | ACC_FINAL | ACC_INTERFACE | ACC_ABSTRACT | ACC_SYNTHETIC | ACC_ANNOTATION | ACC_ENUM
+          flags &= (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT | Opcodes.ACC_SYNTHETIC | Opcodes.ACC_ANNOTATION | Opcodes.ACC_ENUM)
 
-            InnerClassEntry(
-              name = internalName,
-              outerName = outerName.orNull,
-              innerName = innerName.orNull,
-              flags = flags
-            )
-        }
+          InnerClassEntry(
+            name = internalName,
+            outerName = outerName.orNull,
+            innerName = innerName.orNull,
+            flags = flags
+          )
+      }
 
     def inlineInfoAttribute: Either[NoClassBTypeInfo, InlineInfoAttribute] = info.map(i => {
       // InlineInfos are serialized for classes being compiled. For those the info was built by
@@ -711,12 +698,17 @@ abstract class BTypes {
       if (this == other) return Right(true)
       if (isInterface.orThrow) {
         if (other == ObjectRef) return Right(true) // interfaces conform to Object
-        if (!other.isInterface.orThrow) return Right(false)   // this is an interface, the other is some class other than object. interfaces cannot extend classes, so the result is false.
+        if (!other.isInterface.orThrow)
+          return Right(
+            false
+          ) // this is an interface, the other is some class other than object. interfaces cannot extend classes, so the result is false.
         // else: this and other are both interfaces. continue to (*)
       } else {
         val sc = info.orThrow.superClass
-        if (sc.isDefined && sc.get.isSubtypeOf(other).orThrow) return Right(true) // the superclass of this class conforms to other
-        if (!other.isInterface.orThrow) return Right(false) // this and other are both classes, and the superclass of this does not conform
+        if (sc.isDefined && sc.get.isSubtypeOf(other).orThrow)
+          return Right(true) // the superclass of this class conforms to other
+        if (!other.isInterface.orThrow)
+          return Right(false) // this and other are both classes, and the superclass of this does not conform
         // else: this is a class, the other is an interface. continue to (*)
       }
 
@@ -726,13 +718,11 @@ abstract class BTypes {
       case Invalid(noInfo: NoClassBTypeInfo) => Left(noInfo)
     }
 
-    /**
-     * Finding the least upper bound in agreement with the bytecode verifier
-     * Background:
-     *   https://xavierleroy.org/publi/bytecode-verification-JAR.pdf
-     *   http://comments.gmane.org/gmane.comp.java.vm.languages/2293
-     *   https://github.com/scala/bug/issues/3872#issuecomment-292386375
-     */
+    /** Finding the least upper bound in agreement with the bytecode verifier Background:
+      * https://xavierleroy.org/publi/bytecode-verification-JAR.pdf
+      * http://comments.gmane.org/gmane.comp.java.vm.languages/2293
+      * https://github.com/scala/bug/issues/3872#issuecomment-292386375
+      */
     def jvmWiseLUB(other: ClassBType): Either[NoClassBTypeInfo, ClassBType] = {
       def isNotNullOrNothing(c: ClassBType) = !c.isNullType && !c.isNothingType
       assert(isNotNullOrNothing(this) && isNotNullOrNothing(other), s"jvmWiseLUB for null or nothing: $this - $other")
@@ -807,21 +797,27 @@ abstract class BTypes {
     )
     def unapply(cr: ClassBType): Some[InternalName] = Some(cr.internalName)
 
-    /**
-     * Retrieve the `ClassBType` for the class with the given internal name, creating the entry if it doesn't
-     * already exist
-     *
-     * @param internalName The name of the class
-     * @param t            A value that will be passed to the `init` function. For efficiency, callers should use this
-     *                     value rather than capturing it in the `init` lambda, allowing that lambda to be hoisted.
-     * @param fromSymbol   Is this type being initialized from a `Symbol`, rather than from byte code?
-     * @param init         Function to initialize the info of this `BType`. During execution of this function,
-     *                     code _may_ reenter into `apply(internalName, ...)` and retrieve the initializing
-     *                     `ClassBType`.
-     * @tparam T           The type of the state that will be threaded into the `init` function.
-     * @return             The `ClassBType`
-     */
-    final def apply[T](internalName: InternalName, t: T, fromSymbol: Boolean)(init: (ClassBType, T) => Either[NoClassBTypeInfo, ClassInfo]): ClassBType = {
+    /** Retrieve the `ClassBType` for the class with the given internal name, creating the entry if it doesn't already
+      * exist
+      *
+      * @param internalName
+      *   The name of the class
+      * @param t
+      *   A value that will be passed to the `init` function. For efficiency, callers should use this value rather than
+      *   capturing it in the `init` lambda, allowing that lambda to be hoisted.
+      * @param fromSymbol
+      *   Is this type being initialized from a `Symbol`, rather than from byte code?
+      * @param init
+      *   Function to initialize the info of this `BType`. During execution of this function, code _may_ reenter into
+      *   `apply(internalName, ...)` and retrieve the initializing `ClassBType`.
+      * @tparam T
+      *   The type of the state that will be threaded into the `init` function.
+      * @return
+      *   The `ClassBType`
+      */
+    final def apply[T](internalName: InternalName, t: T, fromSymbol: Boolean)(
+        init: (ClassBType, T) => Either[NoClassBTypeInfo, ClassInfo]
+    ): ClassBType = {
       val cached = classBTypeCache.get(internalName)
       if (cached ne null) cached
       else {
@@ -836,7 +832,7 @@ abstract class BTypes {
               newRes._info = init(newRes, t)
               newRes.checkInfoConsistency()
               newRes
-          case old =>
+            case old =>
               old
           }
         }
@@ -850,74 +846,87 @@ abstract class BTypes {
     override def fromSymbol: Boolean = false
   }
 
-  /**
-   * The type info for a class. Used for symboltable-independent subtype checks in the backend.
-   *
-   * @param superClass    The super class, not defined for class java/lang/Object.
-   * @param interfaces    All transitively implemented interfaces, except for those inherited
-   *                      through the superclass.
-   * @param flags         The java flags, obtained through `javaFlags`. Used also to derive
-   *                      the flags for InnerClass entries.
-   * @param nestedClasses Classes nested in this class. Those need to be added to the
-   *                      InnerClass table, see the InnerClass spec summary above.
-   * @param nestedInfo    If this describes a nested class, information for the InnerClass table.
-   * @param inlineInfo    Information about this class for the inliner.
-   */
-  final case class ClassInfo(superClass: Option[ClassBType], interfaces: List[ClassBType], flags: Int,
-                             nestedClasses: Lazy[List[ClassBType]], nestedInfo: Lazy[Option[NestedInfo]],
-                             inlineInfo: InlineInfo)
+  /** The type info for a class. Used for symboltable-independent subtype checks in the backend.
+    *
+    * @param superClass
+    *   The super class, not defined for class java/lang/Object.
+    * @param interfaces
+    *   All transitively implemented interfaces, except for those inherited through the superclass.
+    * @param flags
+    *   The java flags, obtained through `javaFlags`. Used also to derive the flags for InnerClass entries.
+    * @param nestedClasses
+    *   Classes nested in this class. Those need to be added to the InnerClass table, see the InnerClass spec summary
+    *   above.
+    * @param nestedInfo
+    *   If this describes a nested class, information for the InnerClass table.
+    * @param inlineInfo
+    *   Information about this class for the inliner.
+    */
+  final case class ClassInfo(
+      superClass: Option[ClassBType],
+      interfaces: List[ClassBType],
+      flags: Int,
+      nestedClasses: Lazy[List[ClassBType]],
+      nestedInfo: Lazy[Option[NestedInfo]],
+      inlineInfo: InlineInfo
+  )
 
-  /**
-   * Information required to add a class to an InnerClass table.
-   * The spec summary above explains what information is required for the InnerClass entry.
-   *
-   * @param enclosingClass      The enclosing class, if it is also nested. When adding a class
-   *                            to the InnerClass table, enclosing nested classes are also added.
-   * @param outerName           The outerName field in the InnerClass entry, may be None.
-   * @param innerName           The innerName field, may be None.
-   * @param isStaticNestedClass True if this is a static nested class (not inner class) (*)
-   *
-   * (*) Note that the STATIC flag in ClassInfo.flags, obtained through javaFlags(classSym), is not
-   * correct for the InnerClass entry, see javaFlags. The static flag in the InnerClass describes
-   * a source-level property: if the class is in a static context (does not have an outer pointer).
-   * This is checked when building the NestedInfo.
-   */
-  final case class NestedInfo(enclosingClass: ClassBType,
-                              outerName: Option[String],
-                              innerName: Option[String],
-                              isStaticNestedClass: Boolean,
-                              enteringTyperPrivate: Boolean)
+  /** Information required to add a class to an InnerClass table. The spec summary above explains what information is
+    * required for the InnerClass entry.
+    *
+    * @param enclosingClass
+    *   The enclosing class, if it is also nested. When adding a class to the InnerClass table, enclosing nested classes
+    *   are also added.
+    * @param outerName
+    *   The outerName field in the InnerClass entry, may be None.
+    * @param innerName
+    *   The innerName field, may be None.
+    * @param isStaticNestedClass
+    *   True if this is a static nested class (not inner class) (*)
+    *
+    * (*) Note that the STATIC flag in ClassInfo.flags, obtained through javaFlags(classSym), is not correct for the
+    * InnerClass entry, see javaFlags. The static flag in the InnerClass describes a source-level property: if the class
+    * is in a static context (does not have an outer pointer). This is checked when building the NestedInfo.
+    */
+  final case class NestedInfo(
+      enclosingClass: ClassBType,
+      outerName: Option[String],
+      innerName: Option[String],
+      isStaticNestedClass: Boolean,
+      enteringTyperPrivate: Boolean
+  )
 
-  /**
-   * This class holds the data for an entry in the InnerClass table. See the InnerClass summary
-   * above in this file.
-   *
-   * There's some overlap with the class NestedInfo, but it's not exactly the same and cleaner to
-   * keep separate.
-   * @param name      The internal name of the class.
-   * @param outerName The internal name of the outer class, may be null.
-   * @param innerName The simple name of the inner class, may be null.
-   * @param flags     The flags for this class in the InnerClass entry.
-   */
+  /** This class holds the data for an entry in the InnerClass table. See the InnerClass summary above in this file.
+    *
+    * There's some overlap with the class NestedInfo, but it's not exactly the same and cleaner to keep separate.
+    * @param name
+    *   The internal name of the class.
+    * @param outerName
+    *   The internal name of the outer class, may be null.
+    * @param innerName
+    *   The simple name of the inner class, may be null.
+    * @param flags
+    *   The flags for this class in the InnerClass entry.
+    */
   final case class InnerClassEntry(name: String, outerName: String, innerName: String, flags: Int)
 
   final case class ArrayBType(componentType: BType) extends RefBType {
     def dimension: Int = componentType match {
       case a: ArrayBType => 1 + a.dimension
-      case _ => 1
+      case _             => 1
     }
 
     @tailrec
     def elementType: BType = componentType match {
       case a: ArrayBType => a.elementType
-      case t => t
+      case t             => t
     }
   }
 
   final case class MethodBType(argumentTypes: Array[BType], returnType: BType) extends BType
 
   object BTypeExporter extends AutoCloseable {
-    private[this] val builderTL: ThreadLocal[StringBuilder] = new ThreadLocal[StringBuilder](){
+    private[this] val builderTL: ThreadLocal[StringBuilder] = new ThreadLocal[StringBuilder]() {
       override protected def initialValue: StringBuilder = new StringBuilder(64)
     }
 
@@ -953,15 +962,13 @@ abstract class BTypes {
    * They are defs (not vals) because they are implemented using vars (see comment on CoreBTypes).
    */
 
-  /**
-   * Just a named pair, used in CoreBTypes.srBoxesRuntimeBoxToMethods/srBoxesRuntimeUnboxToMethods.
-   */
+  /** Just a named pair, used in CoreBTypes.srBoxesRuntimeBoxToMethods/srBoxesRuntimeUnboxToMethods.
+    */
   final case class MethodNameAndType(name: String, methodType: MethodBType)
 
-  /**
-   * True if the current compilation unit is of a primitive class (scala.Boolean et al).
-   * Used only in assertions. Abstract here because its implementation depends on global.
-   */
+  /** True if the current compilation unit is of a primitive class (scala.Boolean et al). Used only in assertions.
+    * Abstract here because its implementation depends on global.
+    */
   def isCompilingPrimitive: Boolean
 
   // The [[Lazy]] and [[LazyVar]] classes would conceptually be better placed within
@@ -973,39 +980,37 @@ abstract class BTypes {
   // for BTypes, it's easier to add those nested classes to BTypes.
 
   abstract sealed class Lazy[+T] {
-    /** get the result of the lazy value, calculating the result and performing the additional actions if the value
-      * is not already known.
+
+    /** get the result of the lazy value, calculating the result and performing the additional actions if the value is
+      * not already known.
       */
     def force: T
 
-    /** add an accumulating action, which is performed when the result is forced.
-      * If the result is already known at the time of this call then perform the action immediately
+    /** add an accumulating action, which is performed when the result is forced. If the result is already known at the
+      * time of this call then perform the action immediately
       *
-      * If the result is not known the action will be performed after the value is force.
-      * The order of application of multiple onForce definitions is undefined
+      * If the result is not known the action will be performed after the value is force. The order of application of
+      * multiple onForce definitions is undefined
       */
     def onForce(f: T => Unit): Unit
   }
   object Lazy {
 
-    /**
-      * create a Lazy, whose calculation is performed with `frontendLock`
+    /** create a Lazy, whose calculation is performed with `frontendLock`
       */
     def withLock[T <: AnyRef](t: => T): Lazy[T] = new LazyWithLock[T](() => t)
 
-    /**
-      * create a Lazy, whose calculation is conditionally performed with `frontendLock` or eagerly evaluated
+    /** create a Lazy, whose calculation is conditionally performed with `frontendLock` or eagerly evaluated
       */
-    def withLockOrEager[T <: AnyRef](beLazy:Boolean, t: => T): Lazy[T] =
+    def withLockOrEager[T <: AnyRef](beLazy: Boolean, t: => T): Lazy[T] =
       if (beLazy) new LazyWithLock[T](() => t)
       else eager(t)
-    /**
-      * create a Lazy where the result is pre-determined, typically a constant, e.g. Nil None etc
+
+    /** create a Lazy where the result is pre-determined, typically a constant, e.g. Nil None etc
       */
     def eager[T <: AnyRef](value: T): Lazy[T] = new Eager[T](value)
 
-    /**
-      * create a Lazy, whose calculation is performed on demand
+    /** create a Lazy, whose calculation is performed on demand
       */
     def withoutLock[T <: AnyRef](t: => T): Lazy[T] = new LazyWithoutLock[T](() => t)
 
@@ -1029,10 +1034,11 @@ abstract class BTypes {
 
       def onForce(f: T => Unit): Unit = {
         if (value != null) f(value)
-        else this.synchronized {
-          if (value != null) f(value)
-          else postForce = f :: postForce
-        }
+        else
+          this.synchronized {
+            if (value != null) f(value)
+            else postForce = f :: postForce
+          }
       }
 
       def force: T = {
@@ -1043,7 +1049,7 @@ abstract class BTypes {
           result = init(t)
           t = null
           this.synchronized {
-            postForce foreach (_.apply (result))
+            postForce foreach (_.apply(result))
             postForce = Nil
           }
           result
@@ -1053,9 +1059,8 @@ abstract class BTypes {
       def init(t: () => T): T
     }
 
-    /**
-      * A lazy value that synchronizes on the `frontendLock`, and supports accumulating actions
-      * to be executed when it's forced.
+    /** A lazy value that synchronizes on the `frontendLock`, and supports accumulating actions to be executed when it's
+      * forced.
       */
     private final class LazyWithLock[T <: AnyRef](t: () => T) extends AbstractLazy[T](t) {
       def init(t: () => T): T = this.synchronized {
@@ -1064,9 +1069,8 @@ abstract class BTypes {
       }
     }
 
-    /**
-      * A lazy value that doesn't synchronize on the `frontendLock`, and supports accumulating actions
-      * to be executed when it's forced.
+    /** A lazy value that doesn't synchronize on the `frontendLock`, and supports accumulating actions to be executed
+      * when it's forced.
       */
     private final class LazyWithoutLock[T <: AnyRef](t: () => T) extends AbstractLazy[T](t) {
       def init(t: () => T): T = this.synchronized {
@@ -1076,36 +1080,34 @@ abstract class BTypes {
     }
   }
 
-  /**
-   * Create state that lazily evaluated (to work around / not worry about initialization ordering
-   * issues). The state is cleared in each compiler run when the component is initialized.
-   */
+  /** Create state that lazily evaluated (to work around / not worry about initialization ordering issues). The state is
+    * cleared in each compiler run when the component is initialized.
+    */
   def perRunLazy[T](component: PerRunInit)(init: => T): LazyVar[T] = {
     val r = new LazyVar(() => init)
     component.perRunInit(r.reInitialize())
     r
   }
 
-  /**
-   * This implements a lazy value that can be reset and re-initialized.
-   * It synchronizes on `frontendLock` so that lazy state created through this utility can
-   * be safely initialized in the post-processor.
-   *
-   * Note that values defined as `LazyVar`s are usually `lazy val`s themselves (created through the
-   * `perRunLazy` method). This ensures that re-initializing a component only clears those
-   * `LazyVar`s that have actually been used in the previous compiler run.
-   */
+  /** This implements a lazy value that can be reset and re-initialized. It synchronizes on `frontendLock` so that lazy
+    * state created through this utility can be safely initialized in the post-processor.
+    *
+    * Note that values defined as `LazyVar`s are usually `lazy val`s themselves (created through the `perRunLazy`
+    * method). This ensures that re-initializing a component only clears those `LazyVar`s that have actually been used
+    * in the previous compiler run.
+    */
   class LazyVar[T](init: () => T) {
     @volatile private[this] var isInit: Boolean = false
     private[this] var v: T = _
 
     def get: T = {
       if (isInit) v
-      else this.synchronized {
-        if (!isInit) v = init()
-        isInit = true
-        v
-      }
+      else
+        this.synchronized {
+          if (!isInit) v = init()
+          isInit = true
+          v
+        }
     }
 
     def reInitialize(): Unit = this.synchronized {
@@ -1116,37 +1118,38 @@ abstract class BTypes {
 }
 
 object BTypes {
-  /**
-   * A marker for strings that represent class internal names.
-   * Ideally the type would be incompatible with String, for example by making it a value class.
-   * But that would create overhead in a Collection[InternalName].
-   */
+
+  /** A marker for strings that represent class internal names. Ideally the type would be incompatible with String, for
+    * example by making it a value class. But that would create overhead in a Collection[InternalName].
+    */
   type InternalName = String
 
-  /**
-   * Metadata about a ClassBType, used by the inliner.
-   *
-   * More information may be added in the future to enable more elaborate inline heuristics.
-   * Note that this class should contain information that can only be obtained from the ClassSymbol.
-   * Information that can be computed from the ClassNode should be added to the call graph instead.
-   *
-   * @param isEffectivelyFinal     True if the class cannot have subclasses: final classes, module
-   *                               classes.
-   *
-   * @param sam                    If this class is a SAM type, the SAM's "\$name\$descriptor".
-   *
-   * @param methodInfos            The [[MethodInlineInfo]]s for the methods declared in this class.
-   *                               The map is indexed by the string s"\$name\$descriptor" (to
-   *                               disambiguate overloads).
-   *
-   * @param warning                Contains an warning message if an error occurred when building this
-   *                               InlineInfo, for example if some classfile could not be found on
-   *                               the classpath. This warning can be reported later by the inliner.
-   */
-  final case class InlineInfo(isEffectivelyFinal: Boolean,
-                              sam: Option[String],
-                              methodInfos: collection.SortedMap[(String, String), MethodInlineInfo],
-                              warning: Option[ClassInlineInfoWarning]) {
+  /** Metadata about a ClassBType, used by the inliner.
+    *
+    * More information may be added in the future to enable more elaborate inline heuristics. Note that this class
+    * should contain information that can only be obtained from the ClassSymbol. Information that can be computed from
+    * the ClassNode should be added to the call graph instead.
+    *
+    * @param isEffectivelyFinal
+    *   True if the class cannot have subclasses: final classes, module classes.
+    *
+    * @param sam
+    *   If this class is a SAM type, the SAM's "\$name\$descriptor".
+    *
+    * @param methodInfos
+    *   The [[MethodInlineInfo]]s for the methods declared in this class. The map is indexed by the string
+    *   s"\$name\$descriptor" (to disambiguate overloads).
+    *
+    * @param warning
+    *   Contains an warning message if an error occurred when building this InlineInfo, for example if some classfile
+    *   could not be found on the classpath. This warning can be reported later by the inliner.
+    */
+  final case class InlineInfo(
+      isEffectivelyFinal: Boolean,
+      sam: Option[String],
+      methodInfos: collection.SortedMap[(String, String), MethodInlineInfo],
+      warning: Option[ClassInlineInfoWarning]
+  ) {
     lazy val methodInfosSorted: IndexedSeq[((String, String), MethodInlineInfo)] = {
       val result = new Array[((String, String), MethodInlineInfo)](methodInfos.size)
       var i = 0
@@ -1159,21 +1162,26 @@ object BTypes {
     }
   }
 
-  val EmptyInlineInfo = InlineInfo(isEffectivelyFinal = false, sam = None, methodInfos = SortedMap.empty, warning = None)
+  val EmptyInlineInfo =
+    InlineInfo(isEffectivelyFinal = false, sam = None, methodInfos = SortedMap.empty, warning = None)
 
-  /**
-   * Metadata about a method, used by the inliner.
-   *
-   * @param effectivelyFinal                    True if the method cannot be overridden (in Scala)
-   * @param annotatedInline                     True if the method is annotated `@inline`
-   * @param annotatedNoInline                   True if the method is annotated `@noinline`
-   */
-  final case class MethodInlineInfo(effectivelyFinal: Boolean = false,
-                                    annotatedInline: Boolean = false,
-                                    annotatedNoInline: Boolean = false)
+  /** Metadata about a method, used by the inliner.
+    *
+    * @param effectivelyFinal
+    *   True if the method cannot be overridden (in Scala)
+    * @param annotatedInline
+    *   True if the method is annotated `@inline`
+    * @param annotatedNoInline
+    *   True if the method is annotated `@noinline`
+    */
+  final case class MethodInlineInfo(
+      effectivelyFinal: Boolean = false,
+      annotatedInline: Boolean = false,
+      annotatedNoInline: Boolean = false
+  )
 
   // no static way (without symbol table instance) to get to nme.ScalaATTR / ScalaSignatureATTR
-  val ScalaAttributeName    = "Scala"
+  val ScalaAttributeName = "Scala"
   val ScalaSigAttributeName = "ScalaSig"
 
   // when inlining, local variable names of the callee are prefixed with the name of the callee method
@@ -1181,6 +1189,6 @@ object BTypes {
 }
 
 final class ClearableJConcurrentHashMap[K, V] extends scala.collection.mutable.Clearable {
-  val map = new java.util.concurrent.ConcurrentHashMap[K,V]
+  val map = new java.util.concurrent.ConcurrentHashMap[K, V]
   override def clear(): Unit = map.clear()
 }

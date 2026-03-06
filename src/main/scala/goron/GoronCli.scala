@@ -12,7 +12,7 @@ object GoronCli {
     val config = parseArgs(args.toList)
     config match {
       case Some(c) => Goron.run(c)
-      case None => System.exit(1)
+      case None    => System.exit(1)
     }
   }
 
@@ -70,20 +70,21 @@ object GoronCli {
       return None
     }
 
-    Some(GoronConfig(
-      inputJars = inputJars,
-      outputJar = outputJar,
-      entryPoints = entryPoints,
-      verbose = verbose,
-      optInlinerEnabled = optInlinerEnabled,
-      optClosureInvocations = optClosureInvocations,
-      eliminateDeadCode = eliminateDeadCode,
-    ))
+    Some(
+      GoronConfig(
+        inputJars = inputJars,
+        outputJar = outputJar,
+        entryPoints = entryPoints,
+        verbose = verbose,
+        optInlinerEnabled = optInlinerEnabled,
+        optClosureInvocations = optClosureInvocations,
+        eliminateDeadCode = eliminateDeadCode
+      )
+    )
   }
 
   private def printUsage(): Unit = {
-    System.err.println(
-      """Usage: goron [options]
+    System.err.println("""Usage: goron [options]
         |  --input <jar>    Input jar file (can be specified multiple times)
         |  --output <jar>   Output jar file
         |  --entry <class>  Entry point class (internal name, can be repeated)

@@ -12,14 +12,13 @@ import scala.tools.asm.Opcodes._
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
 
-/** Tests for box/unbox elimination.
-  * Adapted from scala.tools.nsc.backend.jvm.opt.BoxUnboxTest.
+/** Tests for box/unbox elimination. Adapted from scala.tools.nsc.backend.jvm.opt.BoxUnboxTest.
   */
 class BoxUnboxTest extends GoronTesting {
   override def goronConfig = super.goronConfig.copy(
     optInlinerEnabled = false,
     optClosureInvocations = false,
-    optLocalOptimizations = true,
+    optLocalOptimizations = true
   )
 
   test("eliminate unused box-unbox") {

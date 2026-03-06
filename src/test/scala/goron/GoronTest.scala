@@ -10,6 +10,7 @@ package goron
 import java.io.File
 
 class GoronTest extends munit.FunSuite {
+
   /** Generate a minimal valid classfile using ASM */
   private def minimalClassBytes(internalName: String): Array[Byte] = {
     import scala.tools.asm._
@@ -29,7 +30,7 @@ class GoronTest extends munit.FunSuite {
     val resourceBytes = "hello".getBytes("UTF-8")
     val entries = Seq(
       JarIO.JarEntry("com/example/Foo.class", classBytes, isClass = true),
-      JarIO.JarEntry("META-INF/services/example", resourceBytes, isClass = false),
+      JarIO.JarEntry("META-INF/services/example", resourceBytes, isClass = false)
     )
     JarIO.writeJar(tmpIn.getAbsolutePath, entries)
 
@@ -40,28 +41,32 @@ class GoronTest extends munit.FunSuite {
     assert(read.exists(e => e.name == "META-INF/services/example" && !e.isClass))
 
     // Roundtrip through Goron (with optimizations disabled for this simple test)
-    Goron.run(GoronConfig(
-      inputJars = List(tmpIn.getAbsolutePath),
-      outputJar = tmpOut.getAbsolutePath,
-      optInlinerEnabled = false,
-      optClosureInvocations = false,
-      optLocalOptimizations = false,
-    ))
+    Goron.run(
+      GoronConfig(
+        inputJars = List(tmpIn.getAbsolutePath),
+        outputJar = tmpOut.getAbsolutePath,
+        optInlinerEnabled = false,
+        optClosureInvocations = false,
+        optLocalOptimizations = false
+      )
+    )
 
     val roundtripped = JarIO.readJar(tmpOut.getAbsolutePath)
     assertEquals(roundtripped.size, 2)
     assert(roundtripped.exists(_.name == "com/example/Foo.class"))
     assertEquals(
       roundtripped.find(_.name == "META-INF/services/example").get.bytes.toSeq,
-      resourceBytes.toSeq,
+      resourceBytes.toSeq
     )
   }
 
   test("Classpath lookup") {
-    val cp = JarClasspath.fromClassEntries(Seq(
-      "com/example/Foo.class" -> Array[Byte](1, 2, 3),
-      "com/example/Bar.class" -> Array[Byte](4, 5, 6),
-    ))
+    val cp = JarClasspath.fromClassEntries(
+      Seq(
+        "com/example/Foo.class" -> Array[Byte](1, 2, 3),
+        "com/example/Bar.class" -> Array[Byte](4, 5, 6)
+      )
+    )
     assert(cp.findClassBytes("com/example/Foo").isDefined)
     assert(cp.findClassBytes("com/example/Baz").isEmpty)
     assertEquals(cp.classNames.size, 2)
@@ -105,13 +110,15 @@ class GoronTest extends munit.FunSuite {
     val entries = Seq(JarIO.JarEntry("com/example/Bar.class", classBytes, isClass = true))
     JarIO.writeJar(tmpIn.getAbsolutePath, entries)
 
-    Goron.run(GoronConfig(
-      inputJars = List(tmpIn.getAbsolutePath),
-      outputJar = tmpOut.getAbsolutePath,
-      optInlinerEnabled = false,
-      optClosureInvocations = false,
-      optLocalOptimizations = true,
-    ))
+    Goron.run(
+      GoronConfig(
+        inputJars = List(tmpIn.getAbsolutePath),
+        outputJar = tmpOut.getAbsolutePath,
+        optInlinerEnabled = false,
+        optClosureInvocations = false,
+        optLocalOptimizations = true
+      )
+    )
 
     val result = JarIO.readJar(tmpOut.getAbsolutePath)
     assertEquals(result.size, 1)
@@ -151,19 +158,21 @@ class GoronTest extends munit.FunSuite {
     val entries = Seq(
       JarIO.JarEntry("com/example/Main.class", mainBytes, isClass = true),
       JarIO.JarEntry("com/example/Used.class", usedBytes, isClass = true),
-      JarIO.JarEntry("com/example/Unused.class", unusedBytes, isClass = true),
+      JarIO.JarEntry("com/example/Unused.class", unusedBytes, isClass = true)
     )
     JarIO.writeJar(tmpIn.getAbsolutePath, entries)
 
-    Goron.run(GoronConfig(
-      inputJars = List(tmpIn.getAbsolutePath),
-      outputJar = tmpOut.getAbsolutePath,
-      entryPoints = List("com/example/Main"),
-      eliminateDeadCode = true,
-      optInlinerEnabled = false,
-      optClosureInvocations = false,
-      optLocalOptimizations = false,
-    ))
+    Goron.run(
+      GoronConfig(
+        inputJars = List(tmpIn.getAbsolutePath),
+        outputJar = tmpOut.getAbsolutePath,
+        entryPoints = List("com/example/Main"),
+        eliminateDeadCode = true,
+        optInlinerEnabled = false,
+        optClosureInvocations = false,
+        optLocalOptimizations = false
+      )
+    )
 
     val result = JarIO.readJar(tmpOut.getAbsolutePath)
     val classNames = result.filter(_.isClass).map(_.name).toSet
@@ -182,7 +191,14 @@ class GoronTest extends munit.FunSuite {
 
     val helperBytes = {
       val cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES)
-      cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL, "com/example/Helper", null, "java/lang/Object", null)
+      cw.visit(
+        Opcodes.V11,
+        Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL,
+        "com/example/Helper",
+        null,
+        "java/lang/Object",
+        null
+      )
       val mv = cw.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, "twice", "(I)I", null, null)
       mv.visitCode()
       mv.visitVarInsn(Opcodes.ILOAD, 0)
@@ -211,17 +227,19 @@ class GoronTest extends munit.FunSuite {
 
     val entries = Seq(
       JarIO.JarEntry("com/example/Helper.class", helperBytes, isClass = true),
-      JarIO.JarEntry("com/example/Caller.class", callerBytes, isClass = true),
+      JarIO.JarEntry("com/example/Caller.class", callerBytes, isClass = true)
     )
     JarIO.writeJar(tmpIn.getAbsolutePath, entries)
 
-    Goron.run(GoronConfig(
-      inputJars = List(tmpIn.getAbsolutePath),
-      outputJar = tmpOut.getAbsolutePath,
-      optInlinerEnabled = true,
-      optClosureInvocations = true,
-      optLocalOptimizations = true,
-    ))
+    Goron.run(
+      GoronConfig(
+        inputJars = List(tmpIn.getAbsolutePath),
+        outputJar = tmpOut.getAbsolutePath,
+        optInlinerEnabled = true,
+        optClosureInvocations = true,
+        optLocalOptimizations = true
+      )
+    )
 
     val result = JarIO.readJar(tmpOut.getAbsolutePath)
     assertEquals(result.size, 2)

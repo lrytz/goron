@@ -12,30 +12,27 @@ import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes
 import scala.tools.asm.tree.{ClassNode, MethodNode}
 
-/**
- * Closed-world class hierarchy analysis. When the full classpath is available,
- * we can determine:
- * - Which classes have no subclasses (effectively final)
- * - Which methods have no overrides (effectively final)
- * - Monomorphic call sites for devirtualization
- */
+/** Closed-world class hierarchy analysis. When the full classpath is available, we can determine:
+  *   - Which classes have no subclasses (effectively final)
+  *   - Which methods have no overrides (effectively final)
+  *   - Monomorphic call sites for devirtualization
+  */
 object ClosedWorldAnalysis {
 
   case class ClassHierarchy(
-    /** Map from class internal name to its direct subclasses */
-    subclasses: Map[String, Set[String]],
-    /** Map from class internal name to its ClassNode */
-    classByName: Map[String, ClassNode],
-    /** Set of classes that are effectively final (no subclasses) */
-    effectivelyFinalClasses: Set[String],
-    /** Set of (owner, name, desc) for methods that are effectively final */
-    effectivelyFinalMethods: Set[(String, String, String)]
+      /** Map from class internal name to its direct subclasses */
+      subclasses: Map[String, Set[String]],
+      /** Map from class internal name to its ClassNode */
+      classByName: Map[String, ClassNode],
+      /** Set of classes that are effectively final (no subclasses) */
+      effectivelyFinalClasses: Set[String],
+      /** Set of (owner, name, desc) for methods that are effectively final */
+      effectivelyFinalMethods: Set[(String, String, String)]
   )
 
-  /**
-   * Build the class hierarchy from all program classes.
-   * External classes (JDK, etc.) are treated as having unknown subclasses.
-   */
+  /** Build the class hierarchy from all program classes. External classes (JDK, etc.) are treated as having unknown
+    * subclasses.
+    */
   def buildHierarchy(classNodes: Iterable[ClassNode]): ClassHierarchy = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
     val subclasses = mutable.Map.empty[String, mutable.Set[String]]
@@ -93,12 +90,12 @@ object ClosedWorldAnalysis {
     (mn.access & Opcodes.ACC_STATIC) != 0
 
   private def isEffectivelyFinalMethod(
-    mn: MethodNode,
-    cn: ClassNode,
-    className: String,
-    classByName: Map[String, ClassNode],
-    subclasses: Map[String, Set[String]],
-    effectivelyFinalClasses: Set[String]
+      mn: MethodNode,
+      cn: ClassNode,
+      className: String,
+      classByName: Map[String, ClassNode],
+      subclasses: Map[String, Set[String]],
+      effectivelyFinalClasses: Set[String]
   ): Boolean = {
     // Static, private, and constructor methods are always effectively final
     if (isStaticMethod(mn) || isPrivateMethod(mn) || mn.name == "<init>" || mn.name == "<clinit>") return true
@@ -112,11 +109,11 @@ object ClosedWorldAnalysis {
   }
 
   private def hasOverrideInSubclasses(
-    className: String,
-    methodName: String,
-    methodDesc: String,
-    classByName: Map[String, ClassNode],
-    subclasses: Map[String, Set[String]]
+      className: String,
+      methodName: String,
+      methodDesc: String,
+      classByName: Map[String, ClassNode],
+      subclasses: Map[String, Set[String]]
   ): Boolean = {
     val directSubs = subclasses.getOrElse(className, Set.empty)
     directSubs.exists { sub =>
@@ -126,10 +123,9 @@ object ClosedWorldAnalysis {
     }
   }
 
-  /**
-   * Apply closed-world knowledge to ClassNodes by updating InlineInfo.
-   * This marks effectively-final classes and methods so the inliner can be more aggressive.
-   */
+  /** Apply closed-world knowledge to ClassNodes by updating InlineInfo. This marks effectively-final classes and
+    * methods so the inliner can be more aggressive.
+    */
   def applyToClassNodes(classNodes: Iterable[ClassNode], hierarchy: ClassHierarchy): Unit = {
     // Only mark methods ACC_FINAL in classes that are themselves effectively final (leaf classes).
     // Marking methods final in non-leaf classes can cause ClassFormatErrors when methods
@@ -140,8 +136,10 @@ object ClosedWorldAnalysis {
       if (isLeafClass && !isFinalClass(cn) && !isInterface && cn.methods != null) {
         cn.methods.asScala.foreach { mn =>
           val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
-          if (!isFinalMethod(mn) && !isStaticMethod(mn) && !isPrivateMethod(mn)
-              && !isAbstract && mn.name != "<init>" && mn.name != "<clinit>") {
+          if (
+            !isFinalMethod(mn) && !isStaticMethod(mn) && !isPrivateMethod(mn)
+            && !isAbstract && mn.name != "<init>" && mn.name != "<clinit>"
+          ) {
             mn.access |= Opcodes.ACC_FINAL
           }
         }
@@ -149,14 +147,12 @@ object ClosedWorldAnalysis {
     }
   }
 
-  /**
-   * Devirtualize monomorphic call sites: replace invokevirtual/invokeinterface
-   * with invokestatic for final methods in final classes, when the receiver type
-   * can be precisely determined.
-   *
-   * This is a conservative version that only devirtualizes calls on classes that
-   * are effectively final (no subclasses in the closed world).
-   */
+  /** Devirtualize monomorphic call sites: replace invokevirtual/invokeinterface with invokestatic for final methods in
+    * final classes, when the receiver type can be precisely determined.
+    *
+    * This is a conservative version that only devirtualizes calls on classes that are effectively final (no subclasses
+    * in the closed world).
+    */
   def devirtualize(classNodes: Iterable[ClassNode], hierarchy: ClassHierarchy): Int = {
     var count = 0
     for (cn <- classNodes; mn <- cn.methods.asScala if mn.instructions != null) {
@@ -164,9 +160,9 @@ object ClosedWorldAnalysis {
       while (iter.hasNext) {
         iter.next() match {
           case mi: scala.tools.asm.tree.MethodInsnNode
-            if (mi.getOpcode == Opcodes.INVOKEVIRTUAL || mi.getOpcode == Opcodes.INVOKEINTERFACE)
-              && hierarchy.effectivelyFinalClasses.contains(mi.owner)
-              && hierarchy.effectivelyFinalMethods.contains((mi.owner, mi.name, mi.desc)) =>
+              if (mi.getOpcode == Opcodes.INVOKEVIRTUAL || mi.getOpcode == Opcodes.INVOKEINTERFACE)
+                && hierarchy.effectivelyFinalClasses.contains(mi.owner)
+                && hierarchy.effectivelyFinalMethods.contains((mi.owner, mi.name, mi.desc)) =>
             // This call can be devirtualized — the receiver class has no subclasses
             // and the method has no overrides. But we can't just change to invokestatic
             // because the method isn't actually static. We leave this as-is for now

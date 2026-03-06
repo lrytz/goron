@@ -7,7 +7,16 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{AsmUtils, BTypes, BTypesFromClassfile, CompilerSettings, CoreBTypes, LabelNode1, PerRunInit, PostProcessor}
+import goron.optimizer.{
+  AsmUtils,
+  BTypes,
+  BTypesFromClassfile,
+  CompilerSettings,
+  CoreBTypes,
+  LabelNode1,
+  PerRunInit,
+  PostProcessor
+}
 
 import scala.annotation.{switch, tailrec}
 import scala.collection.mutable
@@ -20,130 +29,112 @@ import goron.optimizer.BTypes.InternalName
 import goron.optimizer.analysis._
 import goron.optimizer.opt.BytecodeUtils._
 
-/**
- * Optimizations within a single method. Certain optimizations enable others, for example removing
- * unreachable code can render a `try` block empty and enable removeEmptyExceptionHandlers. The
- * latter in turn enables more unreachable code to be eliminated (the `catch` block), so there is
- * a cyclic dependency. Optimizations that depend on each other are therefore executed in a loop
- * until reaching a fixpoint.
- *
- * The optimizations marked UPSTREAM enable optimizations that were already executed, so they cause
- * another iteration in the fixpoint loop.
- *
- * nullness optimizations: rewrite null-checking branches to GOTO if nullness is known
- *   + enables downstream
- *     - unreachable code (null / non-null branch becomes unreachable)
- *     - box-unbox elimination (may render an escaping consumer of a box unreachable)
- *     - stale stores (aload x is replaced by aconst_null if it's known null)
- *     - simplify jumps (replaces conditional jumps by goto, so may enable goto chains)
- *
- * unreachable code / DCE (removes instructions of basic blocks to which there is no branch)
- *   + enables downstream:
- *     - stale stores (loads may be eliminated, removing consumers of a store)
- *     - empty handlers (try blocks may become empty)
- *     - simplify jumps (goto l; [dead code]; l: ..) => remove goto
- *     - stale local variable descriptors
- *     - (not box-unbox, which is implemented using prod-cons, so it doesn't consider dead code)
- *
- *   note that eliminating empty handlers and stale local variable descriptors is required for
- *   correctness, see the comment in the body of `methodOptimizations`.
- *
- * box-unbox elimination (eliminates box-unbox pairs within the same method)
- *   + enables UPSTREAM:
- *     - nullness optimizations (a box extraction operation (unknown nullness) may be rewritten to
- *       a read of a non-null local. example in doc comment of box-unbox implementation)
- *     - further box-unbox elimination (e.g. an Integer stored in a Tuple; eliminating the tuple may
- *       enable eliminating the Integer)
- *   + enables downstream:
- *     - copy propagation (new locals are introduced, may be aliases of existing)
- *     - stale stores (multi-value boxes where not all values are used)
- *     - redundant casts (`("a", "b")._1`: the generic `_1` method returns `Object`, a cast
- *       to String is added. The cast is redundant after eliminating the tuple.)
- *     - empty local variable descriptors (local variables that were holding the box may become unused)
-  *    - push-pop (due to artifacts of eliminating runtime type tests on primitives)
- *
- * copy propagation (replaces LOAD n to the LOAD m for the smallest m that is an alias of n)
- *   + enables downstream:
- *     - stale stores (a stored value may not be loaded anymore)
- *     - store-load pairs (a load n may now be right after a store n)
- *
- * stale stores (replace STORE by POP), rewrites `ClassTag(x).newArray`, inlines `array_apply/update`
- *   + enables UPSTREAM:
- *     - nullness optimizations (newArray rewrite or inlining may turn things non-null)
- *   + enables downstream:
- *     - push-pop (the new pop may be the single consumer for an instruction)
- *     - redundant casts (because rewrites `newArray`, the array type gets more precise)
- *
- * redundant casts and rewrite some intrinsics: eliminates casts that are statically known to
- * succeed (uses type propagation), rewrites instanceof checks, rewrites intrinsics.
- *   + enables UPSTREAM:
- *     - box-unbox elimination (a removed checkcast may be a box consumer)
- *     - copy propagation (a removed checkcast may turn an upcasted local variable into an alias)
- *   + enables downstream:
- *     - push-pop for closure allocation elimination (every indyLambda is followed by a checkcast,
- *       see scala/bug#9540)
- *     - redundant casts (changing an instanceof to true/false removes branches and can make types
- *       of other values more precise)
- *
- * push-pop (when a POP is the only consumer of a value, remove the POP and its producer)
- *   + enables UPSTREAM:
- *     - stale stores (if a LOAD is removed, a corresponding STORE may become stale)
- *     - box-unbox elimination (push-pop may eliminate a closure allocation, rendering a captured
- *       box non-escaping)
- *     - redundant casts (Int.unbox(x) is replaced by `x.asInstanceOf[Integer]; pop`)
- *     - nullness (`x.intValue` is replaced by `if (x == null) throw null`)
- *   + enables downstream:
- *     - store-load pairs (a variable may become non-live)
- *     - stale handlers (push-pop removes code)
- *     - simplify jumps (push-pop removes code)
- *
- * store-load pairs (remove `STORE x; LOAD x` if x is otherwise not used in the method)
- *   + enables downstream:
- *     - empty handlers (code is removes, a try block may become empty
- *     - simplify jumps (code is removed, a goto may become redundant for example)
- *     - stale local variable descriptors
- *
- * empty handlers (removes exception handlers whose try block is empty)
- *   + enables UPSTREAM:
- *     - unreachable code (catch block becomes unreachable)
- *     - box-unbox (a box may be escape in an operation in a dead handler)
- *   + enables downstream:
- *     - simplify jumps
- *
- * simplify jumps (various, like `GOTO l; l: ...`, see doc comments of individual optimizations)
- *   + enables UPSTREAM
- *     - unreachable code (`GOTO a; a: GOTO b; b: ...`, the first jump is changed to `GOTO b`, the second becomes unreachable)
- *     - store-load pairs (a `GOTO l; l: ...` is removed between store and load)
- *     - push-pop (`IFNULL l; l: ...` is replaced by `POP`)
- *
- *
- * The following cleanup optimizations don't enable any upstream optimizations, so they can be
- * executed once at the end, when the above optimizations reach a fixpoint.
- *
- *
- * empty local variable descriptors (removes unused variables from the local variable table)
- *
- * empty line numbers (eliminates line number nodes that describe no executable instructions)
- *
- * At this point, we used to filter out redundant label nodes (sequences of labels without any
- * executable instructions in between). However, this operation is relatively expensive, and
- * unnecessary: labels don't exist in the classfile, they are lowered to bytecode offsets, so
- * redundant labels disappear by design.
- *
- *
- * Note on a method's maxLocals / maxStack: the backend only uses those values for running
- * Analyzers. The values can be conservative approximations: if an optimization removes code and
- * the maximal stack size is now smaller, the larger maxStack value will still work fine for
- * running an Analyzer (just that frames allocate more space than required). The correct max
- * values written to the bytecode are re-computed during classfile serialization.
- * To keep things simpler, we don't update the max values in every optimization:
- *   - we do it in `removeUnreachableCodeImpl`, because it's quite straightforward
- *   - maxLocals is updated in `compactLocalVariables`, which runs at the end of method optimizations
- *
- *
- * Note on updating the call graph: whenever an optimization eliminates a callsite or a closure
- * instantiation, we eliminate the corresponding entry from the call graph.
- */
+/** Optimizations within a single method. Certain optimizations enable others, for example removing unreachable code can
+  * render a `try` block empty and enable removeEmptyExceptionHandlers. The latter in turn enables more unreachable code
+  * to be eliminated (the `catch` block), so there is a cyclic dependency. Optimizations that depend on each other are
+  * therefore executed in a loop until reaching a fixpoint.
+  *
+  * The optimizations marked UPSTREAM enable optimizations that were already executed, so they cause another iteration
+  * in the fixpoint loop.
+  *
+  * nullness optimizations: rewrite null-checking branches to GOTO if nullness is known + enables downstream
+  *   - unreachable code (null / non-null branch becomes unreachable)
+  *   - box-unbox elimination (may render an escaping consumer of a box unreachable)
+  *   - stale stores (aload x is replaced by aconst_null if it's known null)
+  *   - simplify jumps (replaces conditional jumps by goto, so may enable goto chains)
+  *
+  * unreachable code / DCE (removes instructions of basic blocks to which there is no branch) + enables downstream:
+  *   - stale stores (loads may be eliminated, removing consumers of a store)
+  *   - empty handlers (try blocks may become empty)
+  *   - simplify jumps (goto l; [dead code]; l: ..) => remove goto
+  *   - stale local variable descriptors
+  *   - (not box-unbox, which is implemented using prod-cons, so it doesn't consider dead code)
+  *
+  * note that eliminating empty handlers and stale local variable descriptors is required for correctness, see the
+  * comment in the body of `methodOptimizations`.
+  *
+  * box-unbox elimination (eliminates box-unbox pairs within the same method) + enables UPSTREAM:
+  *   - nullness optimizations (a box extraction operation (unknown nullness) may be rewritten to a read of a non-null
+  *     local. example in doc comment of box-unbox implementation)
+  *   - further box-unbox elimination (e.g. an Integer stored in a Tuple; eliminating the tuple may enable eliminating
+  *     the Integer)
+  * + enables downstream:
+  *   - copy propagation (new locals are introduced, may be aliases of existing)
+  *   - stale stores (multi-value boxes where not all values are used)
+  *   - redundant casts (`("a", "b")._1`: the generic `_1` method returns `Object`, a cast to String is added. The cast
+  *     is redundant after eliminating the tuple.)
+  *   - empty local variable descriptors (local variables that were holding the box may become unused)
+  *   - push-pop (due to artifacts of eliminating runtime type tests on primitives)
+  *
+  * copy propagation (replaces LOAD n to the LOAD m for the smallest m that is an alias of n) + enables downstream:
+  *   - stale stores (a stored value may not be loaded anymore)
+  *   - store-load pairs (a load n may now be right after a store n)
+  *
+  * stale stores (replace STORE by POP), rewrites `ClassTag(x).newArray`, inlines `array_apply/update` + enables
+  * UPSTREAM:
+  *   - nullness optimizations (newArray rewrite or inlining may turn things non-null)
+  * + enables downstream:
+  *   - push-pop (the new pop may be the single consumer for an instruction)
+  *   - redundant casts (because rewrites `newArray`, the array type gets more precise)
+  *
+  * redundant casts and rewrite some intrinsics: eliminates casts that are statically known to succeed (uses type
+  * propagation), rewrites instanceof checks, rewrites intrinsics. + enables UPSTREAM:
+  *   - box-unbox elimination (a removed checkcast may be a box consumer)
+  *   - copy propagation (a removed checkcast may turn an upcasted local variable into an alias)
+  * + enables downstream:
+  *   - push-pop for closure allocation elimination (every indyLambda is followed by a checkcast, see scala/bug#9540)
+  *   - redundant casts (changing an instanceof to true/false removes branches and can make types of other values more
+  *     precise)
+  *
+  * push-pop (when a POP is the only consumer of a value, remove the POP and its producer) + enables UPSTREAM:
+  *   - stale stores (if a LOAD is removed, a corresponding STORE may become stale)
+  *   - box-unbox elimination (push-pop may eliminate a closure allocation, rendering a captured box non-escaping)
+  *   - redundant casts (Int.unbox(x) is replaced by `x.asInstanceOf[Integer]; pop`)
+  *   - nullness (`x.intValue` is replaced by `if (x == null) throw null`)
+  * + enables downstream:
+  *   - store-load pairs (a variable may become non-live)
+  *   - stale handlers (push-pop removes code)
+  *   - simplify jumps (push-pop removes code)
+  *
+  * store-load pairs (remove `STORE x; LOAD x` if x is otherwise not used in the method) + enables downstream:
+  *   - empty handlers (code is removes, a try block may become empty
+  *   - simplify jumps (code is removed, a goto may become redundant for example)
+  *   - stale local variable descriptors
+  *
+  * empty handlers (removes exception handlers whose try block is empty) + enables UPSTREAM:
+  *   - unreachable code (catch block becomes unreachable)
+  *   - box-unbox (a box may be escape in an operation in a dead handler)
+  * + enables downstream:
+  *   - simplify jumps
+  *
+  * simplify jumps (various, like `GOTO l; l: ...`, see doc comments of individual optimizations) + enables UPSTREAM
+  *   - unreachable code (`GOTO a; a: GOTO b; b: ...`, the first jump is changed to `GOTO b`, the second becomes
+  *     unreachable)
+  *   - store-load pairs (a `GOTO l; l: ...` is removed between store and load)
+  *   - push-pop (`IFNULL l; l: ...` is replaced by `POP`)
+  *
+  * The following cleanup optimizations don't enable any upstream optimizations, so they can be executed once at the
+  * end, when the above optimizations reach a fixpoint.
+  *
+  * empty local variable descriptors (removes unused variables from the local variable table)
+  *
+  * empty line numbers (eliminates line number nodes that describe no executable instructions)
+  *
+  * At this point, we used to filter out redundant label nodes (sequences of labels without any executable instructions
+  * in between). However, this operation is relatively expensive, and unnecessary: labels don't exist in the classfile,
+  * they are lowered to bytecode offsets, so redundant labels disappear by design.
+  *
+  * Note on a method's maxLocals / maxStack: the backend only uses those values for running Analyzers. The values can be
+  * conservative approximations: if an optimization removes code and the maximal stack size is now smaller, the larger
+  * maxStack value will still work fine for running an Analyzer (just that frames allocate more space than required).
+  * The correct max values written to the bytecode are re-computed during classfile serialization. To keep things
+  * simpler, we don't update the max values in every optimization:
+  *   - we do it in `removeUnreachableCodeImpl`, because it's quite straightforward
+  *   - maxLocals is updated in `compactLocalVariables`, which runs at the end of method optimizations
+  *
+  * Note on updating the call graph: whenever an optimization eliminates a callsite or a closure instantiation, we
+  * eliminate the corresponding entry from the call graph.
+  */
 abstract class LocalOpt {
   val postProcessor: PostProcessor
 
@@ -156,26 +147,29 @@ abstract class LocalOpt {
 
   import LocalOptImpls._
 
-  lazy val boxUnbox: BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type } = new BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor }
+  lazy val boxUnbox: BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type } = new BoxUnbox {
+    val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor
+  }
   import boxUnbox._
 
-  lazy val copyProp: CopyProp { val postProcessor: LocalOpt.this.postProcessor.type } = new CopyProp { val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor }
+  lazy val copyProp: CopyProp { val postProcessor: LocalOpt.this.postProcessor.type } = new CopyProp {
+    val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor
+  }
   import copyProp._
 
-  /**
-   * Remove unreachable code from a method.
-   *
-   * This implementation only removes instructions that are unreachable for an ASM analyzer /
-   * interpreter. This ensures that future analyses will not produce `null` frames. The inliner
-   * depends on this property.
-   *
-   * @return A set containing the eliminated instructions
-   */
+  /** Remove unreachable code from a method.
+    *
+    * This implementation only removes instructions that are unreachable for an ASM analyzer / interpreter. This ensures
+    * that future analyses will not produce `null` frames. The inliner depends on this property.
+    *
+    * @return
+    *   A set containing the eliminated instructions
+    */
   def minimalRemoveUnreachableCode(method: MethodNode, ownerClassName: InternalName): Boolean = {
     // In principle, for the inliner, a single removeUnreachableCodeImpl would be enough. But that
     // would potentially leave behind stale handlers (empty try block) which is not legal in the
     // classfile. So we run both removeUnreachableCodeImpl and removeEmptyExceptionHandlers.
-    if (method.instructions.size == 0) return false  // fast path for abstract methods
+    if (method.instructions.size == 0) return false // fast path for abstract methods
     if (BackendUtils.isDceDone(method)) return false // we know there is no unreachable code
 
     // For correctness, after removing unreachable code, we have to eliminate empty exception
@@ -198,24 +192,23 @@ abstract class LocalOpt {
     changed
   }
 
-  /**
-   * Remove unreachable instructions from all (non-abstract) methods and apply various other
-   * cleanups to the bytecode.
-   *
-   * @param clazz The class whose methods are optimized
-   * @return      `true` if unreachable code was eliminated in some method, `false` otherwise.
-   */
+  /** Remove unreachable instructions from all (non-abstract) methods and apply various other cleanups to the bytecode.
+    *
+    * @param clazz
+    *   The class whose methods are optimized
+    * @return
+    *   `true` if unreachable code was eliminated in some method, `false` otherwise.
+    */
   def methodOptimizations(clazz: ClassNode): Boolean = {
-    !compilerSettings.optNone && clazz.methods.asScala.foldLeft(false) {
-      case (changed, method) => methodOptimizations(method, clazz.name) || changed
+    !compilerSettings.optNone && clazz.methods.asScala.foldLeft(false) { case (changed, method) =>
+      methodOptimizations(method, clazz.name) || changed
     }
   }
 
-  /**
-   * Run method-level optimizations, see comment on class [[LocalOpt]].
-   *
-   * Returns `true` if the bytecode of `method` was changed.
-   */
+  /** Run method-level optimizations, see comment on class [[LocalOpt]].
+    *
+    * Returns `true` if the bytecode of `method` was changed.
+    */
   def methodOptimizations(method: MethodNode, ownerClassName: InternalName): Boolean = {
     if (method.instructions.size == 0) return false // fast path for abstract methods
 
@@ -277,7 +270,8 @@ abstract class LocalOpt {
         requestRedundantCasts: Boolean,
         requestPushPop: Boolean,
         requestStoreLoad: Boolean,
-        maxRecursion: Int = 10): (Boolean, Boolean) = {
+        maxRecursion: Int = 10
+    ): (Boolean, Boolean) = {
       if (maxRecursion == 0) return (false, false)
 
       traceIfChanged("beforeMethodOpt")
@@ -307,22 +301,30 @@ abstract class LocalOpt {
       traceIfChanged("copyProp")
 
       // STALE STORES
-      val runStaleStores = compilerSettings.optCopyPropagation && (requestStaleStores || nullnessOptChanged || codeRemoved || boxUnboxChanged || copyPropChanged)
-      val (storesRemoved, intrinsicRewrittenByStaleStores, callInlinedByStaleStores) = if (!runStaleStores) (false, false, false) else eliminateStaleStoresAndRewriteSomeIntrinsics(method, ownerClassName)
+      val runStaleStores =
+        compilerSettings.optCopyPropagation && (requestStaleStores || nullnessOptChanged || codeRemoved || boxUnboxChanged || copyPropChanged)
+      val (storesRemoved, intrinsicRewrittenByStaleStores, callInlinedByStaleStores) =
+        if (!runStaleStores) (false, false, false)
+        else eliminateStaleStoresAndRewriteSomeIntrinsics(method, ownerClassName)
       traceIfChanged("staleStores")
 
       // REDUNDANT CASTS
-      val runRedundantCasts = compilerSettings.optRedundantCasts && (requestRedundantCasts || boxUnboxChanged || intrinsicRewrittenByStaleStores || callInlinedByStaleStores)
-      val (typeInsnChanged, intrinsicRewrittenByCasts) = if (!runRedundantCasts) (false, false) else eliminateRedundantCastsAndRewriteSomeIntrinsics(method, ownerClassName)
+      val runRedundantCasts =
+        compilerSettings.optRedundantCasts && (requestRedundantCasts || boxUnboxChanged || intrinsicRewrittenByStaleStores || callInlinedByStaleStores)
+      val (typeInsnChanged, intrinsicRewrittenByCasts) =
+        if (!runRedundantCasts) (false, false)
+        else eliminateRedundantCastsAndRewriteSomeIntrinsics(method, ownerClassName)
       traceIfChanged("redundantCasts")
 
       // PUSH-POP
       val runPushPop = compilerSettings.optCopyPropagation && (requestPushPop || storesRemoved || typeInsnChanged)
-      val (pushPopRemoved, pushPopCastAdded, pushPopNullCheckAdded) = if (!runPushPop) (false, false, false) else eliminatePushPop(method, ownerClassName)
+      val (pushPopRemoved, pushPopCastAdded, pushPopNullCheckAdded) =
+        if (!runPushPop) (false, false, false) else eliminatePushPop(method, ownerClassName)
       traceIfChanged("pushPop")
 
       // STORE-LOAD PAIRS
-      val runStoreLoad = compilerSettings.optCopyPropagation && (requestStoreLoad || boxUnboxChanged || copyPropChanged || pushPopRemoved)
+      val runStoreLoad =
+        compilerSettings.optCopyPropagation && (requestStoreLoad || boxUnboxChanged || copyPropChanged || pushPopRemoved)
       val storeLoadRemoved = runStoreLoad && eliminateStoreLoad(method)
       traceIfChanged("storeLoadPairs")
 
@@ -339,13 +341,15 @@ abstract class LocalOpt {
       // See doc comment in the beginning of this file (optimizations marked UPSTREAM)
       val runNullnessAgain = boxUnboxChanged || callInlinedByStaleStores || pushPopNullCheckAdded
       val runDCEAgain = removeHandlersResult.liveHandlerRemoved || jumpsChanged
-      val runBoxUnboxAgain = boxUnboxChanged || typeInsnChanged || pushPopRemoved || removeHandlersResult.liveHandlerRemoved
+      val runBoxUnboxAgain =
+        boxUnboxChanged || typeInsnChanged || pushPopRemoved || removeHandlersResult.liveHandlerRemoved
       val runCopyPropAgain = typeInsnChanged
       val runStaleStoresAgain = pushPopRemoved
       val runRedundantCastsAgain = typeInsnChanged || pushPopCastAdded
       val runPushPopAgain = jumpsChanged
       val runStoreLoadAgain = jumpsChanged
-      val runAgain = runNullnessAgain || runDCEAgain || runBoxUnboxAgain || runCopyPropAgain || runStaleStoresAgain || runRedundantCastsAgain || runPushPopAgain || runStoreLoadAgain
+      val runAgain =
+        runNullnessAgain || runDCEAgain || runBoxUnboxAgain || runCopyPropAgain || runStaleStoresAgain || runRedundantCastsAgain || runPushPopAgain || runStoreLoadAgain
 
       val downstreamRequireEliminateUnusedLocals = runAgain && removalRound(
         requestNullness = runNullnessAgain,
@@ -356,17 +360,19 @@ abstract class LocalOpt {
         requestRedundantCasts = runRedundantCastsAgain,
         requestPushPop = runPushPopAgain,
         requestStoreLoad = runStoreLoadAgain,
-        maxRecursion = maxRecursion - 1)._2
+        maxRecursion = maxRecursion - 1
+      )._2
 
       val requireEliminateUnusedLocals = downstreamRequireEliminateUnusedLocals ||
         nullnessOptChanged || // nullness opt may eliminate stores / loads, rendering a local unused
-        codeRemoved ||        // see comment in method `methodOptimizations`
-        boxUnboxChanged ||    // box-unbox renders locals (holding boxes) unused
-        storesRemoved  ||
+        codeRemoved || // see comment in method `methodOptimizations`
+        boxUnboxChanged || // box-unbox renders locals (holding boxes) unused
+        storesRemoved ||
         storeLoadRemoved ||
         removeHandlersResult.handlerRemoved
 
-      val codeChanged = nullnessOptChanged || codeRemoved || boxUnboxChanged || copyPropChanged || storesRemoved || intrinsicRewrittenByStaleStores || callInlinedByStaleStores || typeInsnChanged || intrinsicRewrittenByCasts || pushPopRemoved || storeLoadRemoved || removeHandlersResult.handlerRemoved || jumpsChanged
+      val codeChanged =
+        nullnessOptChanged || codeRemoved || boxUnboxChanged || copyPropChanged || storesRemoved || intrinsicRewrittenByStaleStores || callInlinedByStaleStores || typeInsnChanged || intrinsicRewrittenByCasts || pushPopRemoved || storeLoadRemoved || removeHandlersResult.handlerRemoved || jumpsChanged
       (codeChanged, requireEliminateUnusedLocals)
     }
 
@@ -380,7 +386,8 @@ abstract class LocalOpt {
       requestStaleStores = true,
       requestRedundantCasts = true,
       requestPushPop = true,
-      requestStoreLoad = true)
+      requestStoreLoad = true
+    )
 
     if (compilerSettings.optUnreachableCode) BackendUtils.setDceDone(method)
 
@@ -410,19 +417,23 @@ abstract class LocalOpt {
     nullnessDceBoxesCastsCopypropPushpopOrJumpsChanged || localsRemoved || lineNumbersRemoved
   }
 
-  /**
-   * Apply various optimizations based on nullness analysis information.
-   *   - IFNULL / IFNONNULL are rewritten to GOTO if nullness is known
-   *   - IF_ACMPEQ / IF_ACMPNE are rewritten to GOTO if the both references are known null, or if
-   *     one is known null and the other known not-null
-   *   - ALOAD is replaced by ACONST_NULL if the local is known to hold null
-   *   - ASTORE of null is removed if the local is known to hold null
-   *   - INSTANCEOF of null is replaced by `ICONST_0`
-   *   - scala.runtime.BoxesRunTime.unboxToX(null) is rewritten to a zero-value load
-   */
+  /** Apply various optimizations based on nullness analysis information.
+    *   - IFNULL / IFNONNULL are rewritten to GOTO if nullness is known
+    *   - IF_ACMPEQ / IF_ACMPNE are rewritten to GOTO if the both references are known null, or if one is known null and
+    *     the other known not-null
+    *   - ALOAD is replaced by ACONST_NULL if the local is known to hold null
+    *   - ASTORE of null is removed if the local is known to hold null
+    *   - INSTANCEOF of null is replaced by `ICONST_0`
+    *   - scala.runtime.BoxesRunTime.unboxToX(null) is rewritten to a zero-value load
+    */
   def nullnessOptimizations(method: MethodNode, ownerClassName: InternalName): Boolean = {
     AsmAnalyzer.sizeOKForNullness(method) && {
-      lazy val nullnessAnalyzer = new NullnessAnalyzer(method, ownerClassName, backendUtils.isNonNullMethodInvocation, compilerSettings.optAssumeModulesNonNull)
+      lazy val nullnessAnalyzer = new NullnessAnalyzer(
+        method,
+        ownerClassName,
+        backendUtils.isNonNullMethodInvocation,
+        compilerSettings.optAssumeModulesNonNull
+      )
 
       // When running nullness optimizations the method may still have unreachable code. Analyzer
       // frames of unreachable instructions are `null`.
@@ -457,14 +468,16 @@ abstract class LocalOpt {
               val jump = if (taken) List(new JumpInsnNode(GOTO, ji.label)) else Nil
               toReplace(ji) = getPop(1) :: jump
             }
-          } else {
+          }
+          else {
             val isIfEq = ji.getOpcode == IF_ACMPEQ
             val isIfNe = ji.getOpcode == IF_ACMPNE
             if (isIfEq || isIfNe) for (frame <- frameAt(ji)) {
               val aNullness = frame.peekStack(1)
               val bNullness = frame.peekStack(0)
               val eq = aNullness == NullValue && bNullness == NullValue
-              val ne = aNullness == NullValue && bNullness == NotNullValue || aNullness == NotNullValue && bNullness == NullValue
+              val ne =
+                aNullness == NullValue && bNullness == NotNullValue || aNullness == NotNullValue && bNullness == NullValue
               val taken = isIfEq && eq || isIfNe && ne
               val avoided = isIfEq && ne || isIfNe && eq
               if (taken || avoided) {
@@ -481,9 +494,7 @@ abstract class LocalOpt {
 
         case mi: MethodInsnNode =>
           if (isScalaUnbox(mi)) for (frame <- frameAt(mi) if frame.peekStack(0) == NullValue) {
-            toReplace(mi) = List(
-              getPop(1),
-              loadZeroForTypeSort(Type.getReturnType(mi.desc).getSort))
+            toReplace(mi) = List(getPop(1), loadZeroForTypeSort(Type.getReturnType(mi.desc).getSort))
           }
 
         case _ =>
@@ -493,7 +504,7 @@ abstract class LocalOpt {
       // BackendUtils.indyLambdaImplMethods, the removed instructions are not IndyLambdas
       def removeFromCallGraph(insn: AbstractInsnNode): Unit = insn match {
         case mi: MethodInsnNode => callGraph.removeCallsite(mi, method)
-        case _ =>
+        case _                  =>
       }
 
       for ((oldOp, newOps) <- toReplace) {
@@ -507,12 +518,11 @@ abstract class LocalOpt {
     }
   }
 
-  /**
-   * Removes unreachable basic blocks, returns `true` if instructions were removed.
-   *
-   * When this method returns, each `labelNode.getLabel` has a status set whether the label is live
-   * or not. This can be queried using `BackendUtils.isLabelReachable`.
-   */
+  /** Removes unreachable basic blocks, returns `true` if instructions were removed.
+    *
+    * When this method returns, each `labelNode.getLabel` has a status set whether the label is live or not. This can be
+    * queried using `BackendUtils.isLabelReachable`.
+    */
   def removeUnreachableCodeImpl(method: MethodNode, ownerClassName: InternalName): Boolean = {
     val size = method.instructions.size
 
@@ -606,7 +616,7 @@ abstract class LocalOpt {
             enqInsn(t.dflt)
 
           case r: VarInsnNode if r.getOpcode == RET =>
-            // the target is already enqueued, see subroutine shape assumption above
+          // the target is already enqueued, see subroutine shape assumption above
 
           case _ =>
             if (insn.getOpcode != ATHROW && !isReturn(insn))
@@ -641,10 +651,10 @@ abstract class LocalOpt {
               itr.remove()
               changed = true
               insn match {
-                case invocation: MethodInsnNode => callGraph.removeCallsite(invocation, method)
-              case indy: InvokeDynamicInsnNode =>
-                callGraph.removeClosureInstantiation(indy, method)
-                removeIndyLambdaImplMethod(ownerClassName, method, indy)
+                case invocation: MethodInsnNode  => callGraph.removeCallsite(invocation, method)
+                case indy: InvokeDynamicInsnNode =>
+                  callGraph.removeClosureInstantiation(indy, method)
+                  removeIndyLambdaImplMethod(ownerClassName, method, indy)
                 case _ =>
               }
             }
@@ -657,149 +667,156 @@ abstract class LocalOpt {
     dce()
   }
 
-  /**
-   * Eliminate `CHECKCAST` instructions that are statically known to succeed. This is safe if the
-   * tested object is null: `null.asInstanceOf` always succeeds.
-   *
-   * Replace `INSTANCEOF` instructions with `ICONST_0/1` if the result is statically known.
-   *
-   * Since this optimization runs a type analysis, we use it to rewrite some intrinsic method calls
-   *   - `java.lang.reflect.Arrays.getLength(x)` when `x` is statically known to be an array:
-   *     rewrite to `ARRAYLENGTH`
-   *   - `x.getClass` when `x` is statically known to be a primitive array. Rewrite to `LDC`.
-   *
-   * The type of the tested object is determined using a NonLubbingTypeFlowAnalyzer. Note that this
-   * analysis collapses LUBs of non-equal references types to Object for simplicity. Example:
-   * given `B <: A <: Object`, the cast in `(if (..) new B else new A).asInstanceOf[A]` would not
-   * be eliminated.
-   *
-   * Note: to rewrite `INSTANCEOF` tests, we also run a nullness analyzer. We need to know nullness
-   * because `null.isInstanceOf` is always `false`.
-   *
-   * Returns two booleans (typeInsnChanged, intrinsicRewritten)
-   */
-  def eliminateRedundantCastsAndRewriteSomeIntrinsics(method: MethodNode, owner: InternalName): (Boolean, Boolean) = if (!AsmAnalyzer.sizeOKForNullness(method)) (false, false) else {
-    def isSubType(aDescOrIntN: String, bDescOrIntN: String): Boolean = {
-      // Neither a nor b may be descriptors for primitive types. INSTANCEOF and CHECKCAST require
-      //   - "objectref must be of type reference" and
-      //   - "constant pool item must be a class, array, or interface type"
-      // However we may get a mix of descriptors and internal names. The typeAnalyzer returns
-      // descriptors (`Lfoo/C;`), the descriptor in a TypeInsn is an internal name (`foo/C`) or an
-      // array descriptor.
-      def sameClass(a: String, b: String) = {
-        a == b ||
+  /** Eliminate `CHECKCAST` instructions that are statically known to succeed. This is safe if the tested object is
+    * null: `null.asInstanceOf` always succeeds.
+    *
+    * Replace `INSTANCEOF` instructions with `ICONST_0/1` if the result is statically known.
+    *
+    * Since this optimization runs a type analysis, we use it to rewrite some intrinsic method calls
+    *   - `java.lang.reflect.Arrays.getLength(x)` when `x` is statically known to be an array: rewrite to `ARRAYLENGTH`
+    *   - `x.getClass` when `x` is statically known to be a primitive array. Rewrite to `LDC`.
+    *
+    * The type of the tested object is determined using a NonLubbingTypeFlowAnalyzer. Note that this analysis collapses
+    * LUBs of non-equal references types to Object for simplicity. Example: given `B <: A <: Object`, the cast in
+    * `(if (..) new B else new A).asInstanceOf[A]` would not be eliminated.
+    *
+    * Note: to rewrite `INSTANCEOF` tests, we also run a nullness analyzer. We need to know nullness because
+    * `null.isInstanceOf` is always `false`.
+    *
+    * Returns two booleans (typeInsnChanged, intrinsicRewritten)
+    */
+  def eliminateRedundantCastsAndRewriteSomeIntrinsics(method: MethodNode, owner: InternalName): (Boolean, Boolean) =
+    if (!AsmAnalyzer.sizeOKForNullness(method)) (false, false)
+    else {
+      def isSubType(aDescOrIntN: String, bDescOrIntN: String): Boolean = {
+        // Neither a nor b may be descriptors for primitive types. INSTANCEOF and CHECKCAST require
+        //   - "objectref must be of type reference" and
+        //   - "constant pool item must be a class, array, or interface type"
+        // However we may get a mix of descriptors and internal names. The typeAnalyzer returns
+        // descriptors (`Lfoo/C;`), the descriptor in a TypeInsn is an internal name (`foo/C`) or an
+        // array descriptor.
+        def sameClass(a: String, b: String) = {
+          a == b ||
           a.length - 2 == b.length && a(0) == 'L' && a.last == ';' && a.regionMatches(1, b, 0, b.length) ||
           b.length - 2 == a.length && b(0) == 'L' && b.last == ';' && b.regionMatches(1, a, 0, a.length)
-      }
-      sameClass(aDescOrIntN, bDescOrIntN) || sameClass(bDescOrIntN, ObjectRef.internalName) ||
-        bTypeForDescriptorOrInternalNameFromClassfile(aDescOrIntN).conformsTo(bTypeForDescriptorOrInternalNameFromClassfile(bDescOrIntN)).getOrElse(false)
-    }
-
-    // precondition: !isSubType(aDescOrIntN, bDescOrIntN)
-    def isUnrelated(aDescOrIntN: String, bDescOrIntN: String): Boolean = {
-      @tailrec
-      def impl(aTp: BType, bTp: BType): Boolean = {
-        ((aTp, bTp): @unchecked) match {
-          case (aa: ArrayBType, ba: ArrayBType) =>
-            impl(aa.elementType, ba.elementType)
-          case (act: ClassBType, bct: ClassBType) =>
-            val noItf = act.isInterface.flatMap(aIf => bct.isInterface.map(bIf => !aIf && !bIf)).getOrElse(false)
-            noItf && !bct.conformsTo(act).getOrElse(true)
-          case (_: PrimitiveBType, _: RefBType) | (_: RefBType, _: PrimitiveBType) =>
-            true
-          case (_: PrimitiveBType, _: PrimitiveBType) =>
-            // note that this case happens for array element types. [S does not conform to [I.
-            aTp != bTp
-          case _ =>
-            false
         }
+        sameClass(aDescOrIntN, bDescOrIntN) || sameClass(bDescOrIntN, ObjectRef.internalName) ||
+        bTypeForDescriptorOrInternalNameFromClassfile(aDescOrIntN)
+          .conformsTo(bTypeForDescriptorOrInternalNameFromClassfile(bDescOrIntN))
+          .getOrElse(false)
       }
-      impl(
-        bTypeForDescriptorOrInternalNameFromClassfile(aDescOrIntN),
-        bTypeForDescriptorOrInternalNameFromClassfile(bDescOrIntN))
-    }
 
-    lazy val typeAnalyzer = new NonLubbingTypeFlowAnalyzer(method, owner)
-    lazy val nullnessAnalyzer = new NullnessAnalyzer(method, owner, backendUtils.isNonNullMethodInvocation, compilerSettings.optAssumeModulesNonNull)
-
-    // cannot remove instructions while iterating, it gets the analysis out of synch (indexed by instructions)
-    val toReplace = mutable.Map.empty[AbstractInsnNode, List[AbstractInsnNode]]
-
-    val it = method.instructions.iterator
-    while (it.hasNext) it.next() match {
-      case ti: TypeInsnNode =>
-        val opc = ti.getOpcode
-        if (opc == CHECKCAST || opc == INSTANCEOF) {
-          lazy val valueNullness = {
-            val frame = nullnessAnalyzer.frameAt(ti)
-            frame.getValue(frame.stackTop)
+      // precondition: !isSubType(aDescOrIntN, bDescOrIntN)
+      def isUnrelated(aDescOrIntN: String, bDescOrIntN: String): Boolean = {
+        @tailrec
+        def impl(aTp: BType, bTp: BType): Boolean = {
+          ((aTp, bTp): @unchecked) match {
+            case (aa: ArrayBType, ba: ArrayBType) =>
+              impl(aa.elementType, ba.elementType)
+            case (act: ClassBType, bct: ClassBType) =>
+              val noItf = act.isInterface.flatMap(aIf => bct.isInterface.map(bIf => !aIf && !bIf)).getOrElse(false)
+              noItf && !bct.conformsTo(act).getOrElse(true)
+            case (_: PrimitiveBType, _: RefBType) | (_: RefBType, _: PrimitiveBType) =>
+              true
+            case (_: PrimitiveBType, _: PrimitiveBType) =>
+              // note that this case happens for array element types. [S does not conform to [I.
+              aTp != bTp
+            case _ =>
+              false
           }
-          if (opc == INSTANCEOF && valueNullness == NullValue) {
-            toReplace(ti) = List(getPop(1), new InsnNode(ICONST_0))
-          } else {
-            val valueDesc = typeAnalyzer.preciseAaloadTypeDesc({
-              val frame = typeAnalyzer.frameAt(ti)
+        }
+        impl(
+          bTypeForDescriptorOrInternalNameFromClassfile(aDescOrIntN),
+          bTypeForDescriptorOrInternalNameFromClassfile(bDescOrIntN)
+        )
+      }
+
+      lazy val typeAnalyzer = new NonLubbingTypeFlowAnalyzer(method, owner)
+      lazy val nullnessAnalyzer = new NullnessAnalyzer(
+        method,
+        owner,
+        backendUtils.isNonNullMethodInvocation,
+        compilerSettings.optAssumeModulesNonNull
+      )
+
+      // cannot remove instructions while iterating, it gets the analysis out of synch (indexed by instructions)
+      val toReplace = mutable.Map.empty[AbstractInsnNode, List[AbstractInsnNode]]
+
+      val it = method.instructions.iterator
+      while (it.hasNext) it.next() match {
+        case ti: TypeInsnNode =>
+          val opc = ti.getOpcode
+          if (opc == CHECKCAST || opc == INSTANCEOF) {
+            lazy val valueNullness = {
+              val frame = nullnessAnalyzer.frameAt(ti)
               frame.getValue(frame.stackTop)
-            })
-            if (isSubType(valueDesc, ti.desc)) {
-              if (opc == CHECKCAST) {
-                toReplace(ti) = Nil
-              } else if (valueNullness == NotNullValue) {
-                toReplace(ti) = List(getPop(1), new InsnNode(ICONST_1))
-              }
-            } else if (opc == INSTANCEOF && isUnrelated(valueDesc, ti.desc)) {
-              // the two types are unrelated, so the instance check is known to fail
+            }
+            if (opc == INSTANCEOF && valueNullness == NullValue) {
               toReplace(ti) = List(getPop(1), new InsnNode(ICONST_0))
+            } else {
+              val valueDesc = typeAnalyzer.preciseAaloadTypeDesc({
+                val frame = typeAnalyzer.frameAt(ti)
+                frame.getValue(frame.stackTop)
+              })
+              if (isSubType(valueDesc, ti.desc)) {
+                if (opc == CHECKCAST) {
+                  toReplace(ti) = Nil
+                } else if (valueNullness == NotNullValue) {
+                  toReplace(ti) = List(getPop(1), new InsnNode(ICONST_1))
+                }
+              } else if (opc == INSTANCEOF && isUnrelated(valueDesc, ti.desc)) {
+                // the two types are unrelated, so the instance check is known to fail
+                toReplace(ti) = List(getPop(1), new InsnNode(ICONST_0))
+              }
             }
           }
-        }
 
-      case mi: MethodInsnNode =>
-        // Rewrite some known method invocations
-        if (BackendUtils.isArrayGetLengthOnStaticallyKnownArray(mi, typeAnalyzer)) {
-          // Array.getLength(x) where x is known to be an array
-          toReplace(mi) = List(new InsnNode(ARRAYLENGTH))
-        } else {
-          // x.getClass where x is statically known to be a primitive array
-          val getClassTp = BackendUtils.getClassOnStaticallyKnownPrimitiveArray(mi, typeAnalyzer)
-          if (getClassTp != null) {
-            toReplace(mi) = List(getPop(1), new LdcInsnNode(getClassTp))
+        case mi: MethodInsnNode =>
+          // Rewrite some known method invocations
+          if (BackendUtils.isArrayGetLengthOnStaticallyKnownArray(mi, typeAnalyzer)) {
+            // Array.getLength(x) where x is known to be an array
+            toReplace(mi) = List(new InsnNode(ARRAYLENGTH))
+          } else {
+            // x.getClass where x is statically known to be a primitive array
+            val getClassTp = BackendUtils.getClassOnStaticallyKnownPrimitiveArray(mi, typeAnalyzer)
+            if (getClassTp != null) {
+              toReplace(mi) = List(getPop(1), new LdcInsnNode(getClassTp))
+            }
           }
-        }
 
-      case _ =>
+        case _ =>
+      }
+
+      var typeInsnChanged = false
+      var intrinsicRewritten = false
+
+      for ((oldOp, newOp) <- toReplace) {
+        if (oldOp.isInstanceOf[TypeInsnNode]) typeInsnChanged = true
+        else if (oldOp.isInstanceOf[MethodInsnNode]) intrinsicRewritten = true
+        for (n <- newOp) method.instructions.insertBefore(oldOp, n)
+        method.instructions.remove(oldOp)
+      }
+
+      (typeInsnChanged, intrinsicRewritten)
     }
-
-    var typeInsnChanged = false
-    var intrinsicRewritten = false
-
-    for ((oldOp, newOp) <- toReplace) {
-      if (oldOp.isInstanceOf[TypeInsnNode]) typeInsnChanged = true
-      else if (oldOp.isInstanceOf[MethodInsnNode]) intrinsicRewritten = true
-      for (n <- newOp) method.instructions.insertBefore(oldOp, n)
-      method.instructions.remove(oldOp)
-    }
-
-    (typeInsnChanged, intrinsicRewritten)
-  }
 }
 
 object LocalOptImpls {
-  /**
-   * Remove exception handlers that cover empty code blocks. A block is considered empty if it
-   * consist only of labels, frames, line numbers, nops and gotos.
-   *
-   * There are no executable instructions that we can assume don't throw (eg ILOAD). The JVM spec
-   * basically says that a VirtualMachineError may be thrown at any time:
-   *   https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.3
-   *
-   * Note that no instructions are eliminated.
-   *
-   * Returns a pair of booleans (handlerRemoved, liveHandlerRemoved)
-   *
-   * The `liveHandlerRemoved` result depends on `removeUnreachableCode` being executed
-   * before, so that `BackendUtils.isLabelReachable` gives a correct answer.
-   */
+
+  /** Remove exception handlers that cover empty code blocks. A block is considered empty if it consist only of labels,
+    * frames, line numbers, nops and gotos.
+    *
+    * There are no executable instructions that we can assume don't throw (eg ILOAD). The JVM spec basically says that a
+    * VirtualMachineError may be thrown at any time:
+    * https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.3
+    *
+    * Note that no instructions are eliminated.
+    *
+    * Returns a pair of booleans (handlerRemoved, liveHandlerRemoved)
+    *
+    * The `liveHandlerRemoved` result depends on `removeUnreachableCode` being executed before, so that
+    * `BackendUtils.isLabelReachable` gives a correct answer.
+    */
   def removeEmptyExceptionHandlers(method: MethodNode): RemoveHandlersResult = {
     /* True if there exists code between start and end. */
     @tailrec
@@ -807,7 +824,7 @@ object LocalOptImpls {
       start != end && ((start.getOpcode: @switch) match {
         // FrameNode, LabelNode and LineNumberNode have opcode == -1.
         case -1 | GOTO => containsExecutableCode(start.getNext, end)
-        case _ => true
+        case _         => true
       })
     }
 
@@ -842,20 +859,20 @@ object LocalOptImpls {
     }
   }
 
-  /**
-   * Remove all non-parameter entries from the local variable table which denote variables that are
-   * not actually read or written.
-   *
-   * Note that each entry in the local variable table has a start, end and index. Two entries with
-   * the same index, but distinct start / end ranges are different variables, they may have not the
-   * same type or name.
-   */
-  def removeUnusedLocalVariableNodes(method: MethodNode)(firstLocalIndex: Int = parametersSize(method), renumber: Int => Int = identity): Boolean = {
+  /** Remove all non-parameter entries from the local variable table which denote variables that are not actually read
+    * or written.
+    *
+    * Note that each entry in the local variable table has a start, end and index. Two entries with the same index, but
+    * distinct start / end ranges are different variables, they may have not the same type or name.
+    */
+  def removeUnusedLocalVariableNodes(
+      method: MethodNode
+  )(firstLocalIndex: Int = parametersSize(method), renumber: Int => Int = identity): Boolean = {
     @tailrec def variableIsUsed(start: AbstractInsnNode, end: LabelNode, varIndex: Int): Boolean = {
       start != end && (start match {
-        case v: VarInsnNode if v.`var` == varIndex => true
+        case v: VarInsnNode if v.`var` == varIndex  => true
         case i: IincInsnNode if i.`var` == varIndex => true
-        case _ => variableIsUsed(start.getNext, end, varIndex)
+        case _                                      => variableIsUsed(start.getNext, end, varIndex)
       })
     }
 
@@ -868,7 +885,7 @@ object LocalOptImpls {
       if (index >= firstLocalIndex) {
         def previousOrSelf(insn: AbstractInsnNode) = insn.getPrevious match {
           case null => insn
-          case i => i
+          case i    => i
         }
         val storeInsn = previousOrSelf(local.start) // the start index is after the store, see scala/scala#8897
         val used = variableIsUsed(storeInsn, local.end, index)
@@ -879,16 +896,15 @@ object LocalOptImpls {
     method.localVariables.size != initialNumVars
   }
 
-  /**
-   * Compact the local variable slots used in the method's implementation. This prevents having
-   * unused slots for example after eliminating unreachable code.
-   *
-   * This transformation reduces the size of the frame for invoking the method. For example, if the
-   * method has an ISTORE instruction to the local variable 3, the maxLocals of the method is at
-   * least 4, even if some local variable slots below 3 are not used by any instruction.
-   *
-   * This could be improved by doing proper register allocation.
-   */
+  /** Compact the local variable slots used in the method's implementation. This prevents having unused slots for
+    * example after eliminating unreachable code.
+    *
+    * This transformation reduces the size of the frame for invoking the method. For example, if the method has an
+    * ISTORE instruction to the local variable 3, the maxLocals of the method is at least 4, even if some local variable
+    * slots below 3 are not used by any instruction.
+    *
+    * This could be improved by doing proper register allocation.
+    */
   def compactLocalVariables(method: MethodNode): Boolean = {
     // This array is built up to map local variable indices from old to new.
     val renumber = collection.mutable.ArrayBuffer.empty[Int]
@@ -914,7 +930,7 @@ object LocalOptImpls {
     for (i <- 0 until firstLocalIndex) renumber += i // parameters and `this` are always used.
     method.instructions.iterator.asScala foreach {
       case VarInstruction(varIns, slot) => addVar(varIns, slot)
-      case _ =>
+      case _                            =>
     }
 
     // assign the next free slot to each used local variable.
@@ -937,7 +953,7 @@ object LocalOptImpls {
         case VarInstruction(varIns, slot) =>
           val oldIndex = slot
           if (oldIndex >= firstLocalIndex && renumber(oldIndex) != oldIndex) varIns match {
-            case vi: VarInsnNode => vi.`var` = renumber(slot)
+            case vi: VarInsnNode  => vi.`var` = renumber(slot)
             case ii: IincInsnNode => ii.`var` = renumber(slot)
             case x                => throw new MatchError(x)
           }
@@ -947,22 +963,20 @@ object LocalOptImpls {
     }
   }
 
-  /**
-   * Removes LineNumberNodes that don't describe any executable instructions.
-   *
-   * As a side-effect, this traversal removes the `LABEL_REACHABLE_STATUS` flag from all label's
-   * `status` fields.
-   *
-   * This method expects (and asserts) that the `start` label of each LineNumberNode is the
-   * lexically preceding label declaration.
-   */
+  /** Removes LineNumberNodes that don't describe any executable instructions.
+    *
+    * As a side-effect, this traversal removes the `LABEL_REACHABLE_STATUS` flag from all label's `status` fields.
+    *
+    * This method expects (and asserts) that the `start` label of each LineNumberNode is the lexically preceding label
+    * declaration.
+    */
   def removeEmptyLineNumbers(method: MethodNode): Boolean = {
     @tailrec
     def isEmpty(node: AbstractInsnNode): Boolean = node.getNext match {
-      case null => true
-      case _: LineNumberNode => true
+      case null                  => true
+      case _: LineNumberNode     => true
       case n if n.getOpcode >= 0 => false
-      case n => isEmpty(n)
+      case n                     => isEmpty(n)
     }
 
     val initialSize = method.instructions.size
@@ -982,9 +996,8 @@ object LocalOptImpls {
     method.instructions.size != initialSize
   }
 
-  /**
-   * Apply various simplifications to branching instructions.
-   */
+  /** Apply various simplifications to branching instructions.
+    */
   def simplifyJumps(method: MethodNode): Boolean = {
 
     val allHandlers = method.tryCatchBlocks.asScala.toSet
@@ -1057,7 +1070,8 @@ object LocalOptImpls {
     def collapseJumpChains(insn: AbstractInsnNode): Boolean = insn match {
       case JumpNonJsr(jump) =>
         val target = finalJumpTarget(jump)
-        if (jump.label == target) false else {
+        if (jump.label == target) false
+        else {
           jump.label = target
           _jumpTargets = null
           true
@@ -1128,20 +1142,21 @@ object LocalOptImpls {
      * an IllegalMonitorStateException, as described here:
      *   https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.5.return
      */
-    def simplifyGotoReturn(instruction: AbstractInsnNode, inTryBlock: Boolean): Boolean = !inTryBlock && (instruction match {
-      case Goto(jump) =>
-        nextExecutableInstruction(jump.label) match {
-          case Some(target) =>
-            if (isReturn(target) || target.getOpcode == ATHROW) {
-              method.instructions.set(jump, target.clone(null))
-              removeJumpFromMap(jump)
-              true
-            } else false
+    def simplifyGotoReturn(instruction: AbstractInsnNode, inTryBlock: Boolean): Boolean =
+      !inTryBlock && (instruction match {
+        case Goto(jump) =>
+          nextExecutableInstruction(jump.label) match {
+            case Some(target) =>
+              if (isReturn(target) || target.getOpcode == ATHROW) {
+                method.instructions.set(jump, target.clone(null))
+                removeJumpFromMap(jump)
+                true
+              } else false
 
-          case _ => false
-        }
-      case _ => false
-    })
+            case _ => false
+          }
+        case _ => false
+      })
 
     /*
      * Replace conditional jump instructions with GOTO or NOP if statically known to be true or false.

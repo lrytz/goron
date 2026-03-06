@@ -29,17 +29,16 @@ object JarClasspath {
   }
 }
 
-/**
- * Classpath that falls back to loading classes from a classloader.
- * This is needed because the optimizer resolves well-known types like java/lang/Object,
- * java/lang/Character, etc. that are part of the JDK or scala-library.
- *
- * @param classLoader The classloader to use for fallback lookups. Defaults to the system
- *                    classloader, which works when running as a standalone JVM process.
- *                    In environments like sbt's in-process test runner, pass the test
- *                    classloader to also find scala-library classes.
- */
-class RuntimeClasspath(primary: Classpath, classLoader: ClassLoader = ClassLoader.getSystemClassLoader) extends Classpath {
+/** Classpath that falls back to loading classes from a classloader. This is needed because the optimizer resolves
+  * well-known types like java/lang/Object, java/lang/Character, etc. that are part of the JDK or scala-library.
+  *
+  * @param classLoader
+  *   The classloader to use for fallback lookups. Defaults to the system classloader, which works when running as a
+  *   standalone JVM process. In environments like sbt's in-process test runner, pass the test classloader to also find
+  *   scala-library classes.
+  */
+class RuntimeClasspath(primary: Classpath, classLoader: ClassLoader = ClassLoader.getSystemClassLoader)
+    extends Classpath {
   def findClassBytes(internalName: String): Option[Array[Byte]] =
     primary.findClassBytes(internalName).orElse(loadFromRuntime(internalName))
 

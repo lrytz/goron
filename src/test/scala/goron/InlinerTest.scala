@@ -12,17 +12,16 @@ import scala.tools.asm.Opcodes._
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
 
-/** Tests for cross-class inlining through goron's optimizer.
-  * Adapted from scala.tools.nsc.backend.jvm.opt.InlinerTest.
+/** Tests for cross-class inlining through goron's optimizer. Adapted from scala.tools.nsc.backend.jvm.opt.InlinerTest.
   *
-  * These tests compile with no compiler-level optimizations, then run the full
-  * goron pipeline (inlining + closure optimization + local optimizations).
+  * These tests compile with no compiler-level optimizations, then run the full goron pipeline (inlining + closure
+  * optimization + local optimizations).
   */
 class InlinerTest extends GoronTesting {
   override def goronConfig = super.goronConfig.copy(
     optInlinerEnabled = true,
     optClosureInvocations = true,
-    optLocalOptimizations = true,
+    optLocalOptimizations = true
   )
 
   test("inline simple @inline final") {
@@ -55,7 +54,8 @@ class InlinerTest extends GoronTesting {
     val classes = compileAndOptimize(code)
     val c = findClass(classes, "C")
     val ins = getInstructions(c, "f")
-    val invokeSysArraycopy = Invoke(INVOKESTATIC, "java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V", itf = false)
+    val invokeSysArraycopy =
+      Invoke(INVOKESTATIC, "java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V", itf = false)
     assert(ins contains invokeSysArraycopy, s"Expected System.arraycopy:\n${ins.mkString("\n")}")
   }
 

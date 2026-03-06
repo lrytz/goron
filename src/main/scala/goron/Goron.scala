@@ -32,8 +32,9 @@ object Goron {
 
     // Create the optimizer pipeline
     val settings = CompilerSettings.fromConfig(config)
-    val reporter = if (config.verbose) BackendReporting.ConsoleReporter
-                   else BackendReporting.SilentReporter
+    val reporter =
+      if (config.verbose) BackendReporting.ConsoleReporter
+      else BackendReporting.SilentReporter
     val pp = createPostProcessor(settings, classpath, reporter)
     pp.initialize()
 
@@ -77,8 +78,10 @@ object Goron {
       // Analyze hierarchy across ALL classes for accurate finality analysis
       val hierarchy = ClosedWorldAnalysis.buildHierarchy(classNodes)
       if (config.verbose) {
-        println(s"  Closed-world: ${hierarchy.effectivelyFinalClasses.size} effectively-final classes, " +
-          s"${hierarchy.effectivelyFinalMethods.size} effectively-final methods")
+        println(
+          s"  Closed-world: ${hierarchy.effectivelyFinalClasses.size} effectively-final classes, " +
+            s"${hierarchy.effectivelyFinalMethods.size} effectively-final methods"
+        )
       }
       // But only apply finality markers to reachable classes (the ones we'll serialize)
       ClosedWorldAnalysis.applyToClassNodes(reachableClassNodes, hierarchy)
@@ -104,7 +107,9 @@ object Goron {
       val strippedMethods = ReachabilityAnalysis.stripUnreachableMethods(surviving, reachableMethods, execReachable)
       if (config.verbose) {
         val removedClasses = reachableClassNodes.size - surviving.size
-        println(s"  Dead code elimination: keeping ${surviving.size} of ${reachableClassNodes.size} classes ($removedClasses classes removed, $strippedMethods methods stripped)")
+        println(
+          s"  Dead code elimination: keeping ${surviving.size} of ${reachableClassNodes.size} classes ($removedClasses classes removed, $strippedMethods methods stripped)"
+        )
       }
       surviving
     } else {
@@ -125,9 +130,9 @@ object Goron {
 
   /** Create a fully wired PostProcessor with the cake pattern. */
   private def createPostProcessor(
-    settings: CompilerSettings,
-    cp: Classpath,
-    reporter: BackendReporting.Reporter
+      settings: CompilerSettings,
+      cp: Classpath,
+      reporter: BackendReporting.Reporter
   ): PostProcessor = {
     val bt: BTypes = new BTypes { btSelf =>
       val compilerSettings: CompilerSettings = settings

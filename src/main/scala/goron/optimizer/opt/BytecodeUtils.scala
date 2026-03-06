@@ -7,7 +7,15 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{BTypes, BTypesFromClassfile, CompilerSettings, CoreBTypes, LabelNode1, PerRunInit, PostProcessor}
+import goron.optimizer.{
+  BTypes,
+  BTypesFromClassfile,
+  CompilerSettings,
+  CoreBTypes,
+  LabelNode1,
+  PerRunInit,
+  PostProcessor
+}
 
 import scala.annotation.{switch, tailrec}
 import scala.collection.mutable
@@ -93,7 +101,7 @@ object BytecodeUtils {
 
   def isLoad(instruction: AbstractInsnNode): Boolean = {
     val op = instruction.getOpcode
-    op >= ILOAD  && op <= ALOAD
+    op >= ILOAD && op <= ALOAD
   }
 
   def isStore(instruction: AbstractInsnNode): Boolean = {
@@ -101,7 +109,8 @@ object BytecodeUtils {
     op >= ISTORE && op <= ASTORE
   }
 
-  def isLoadStoreOrRet(instruction: AbstractInsnNode): Boolean = isLoad(instruction) || isStore(instruction) || instruction.getOpcode == RET
+  def isLoadStoreOrRet(instruction: AbstractInsnNode): Boolean =
+    isLoad(instruction) || isStore(instruction) || instruction.getOpcode == RET
 
   def isLoadOrStore(instruction: AbstractInsnNode): Boolean = isLoad(instruction) || isStore(instruction)
 
@@ -144,9 +153,12 @@ object BytecodeUtils {
   // cross-jdk
   def hasCallerSensitiveAnnotation(methodNode: MethodNode): Boolean =
     methodNode.visibleAnnotations != null &&
-    methodNode.visibleAnnotations.stream.filter(ann =>
-      ann.desc == "Lsun/reflect/CallerSensitive;" || ann.desc == "Ljdk/internal/reflect/CallerSensitive;"
-    ).findFirst.isPresent
+      methodNode.visibleAnnotations.stream
+        .filter(ann =>
+          ann.desc == "Lsun/reflect/CallerSensitive;" || ann.desc == "Ljdk/internal/reflect/CallerSensitive;"
+        )
+        .findFirst
+        .isPresent
 
   def isFinalClass(classNode: ClassNode): Boolean = (classNode.access & ACC_FINAL) != 0
 
@@ -158,9 +170,13 @@ object BytecodeUtils {
 
   def isReference(t: Type): Boolean = t.getSort == Type.OBJECT || t.getSort == Type.ARRAY
 
-  /** Find the nearest preceding node to `insn` which is executable (i.e., not a label / line number)
-    * and which is not selected by `stopBefore`. */
-  @tailrec def previousExecutableInstruction(insn: AbstractInsnNode, stopBefore: AbstractInsnNode => Boolean = Set()): Option[AbstractInsnNode] = {
+  /** Find the nearest preceding node to `insn` which is executable (i.e., not a label / line number) and which is not
+    * selected by `stopBefore`.
+    */
+  @tailrec def previousExecutableInstruction(
+      insn: AbstractInsnNode,
+      stopBefore: AbstractInsnNode => Boolean = Set()
+  ): Option[AbstractInsnNode] = {
     val prev = insn.getPrevious
     if (prev == null || stopBefore(insn)) None
     else if (isExecutable(prev)) Some(prev)
@@ -170,13 +186,16 @@ object BytecodeUtils {
   @tailrec def previousLineNumber(insn: AbstractInsnNode): Option[Int] = {
     val prev = insn.getPrevious
     prev match {
-      case null => None
+      case null                 => None
       case line: LineNumberNode => Some(line.line)
-      case _ => previousLineNumber(prev)
+      case _                    => previousLineNumber(prev)
     }
   }
 
-  @tailrec def nextExecutableInstruction(insn: AbstractInsnNode, alsoKeep: AbstractInsnNode => Boolean = Set()): Option[AbstractInsnNode] = {
+  @tailrec def nextExecutableInstruction(
+      insn: AbstractInsnNode,
+      alsoKeep: AbstractInsnNode => Boolean = Set()
+  ): Option[AbstractInsnNode] = {
     val next = insn.getNext
     if (next == null || isExecutable(next) || alsoKeep(next)) Option(next)
     else nextExecutableInstruction(next, alsoKeep)
@@ -194,13 +213,14 @@ object BytecodeUtils {
     }
     @tailrec def find(insn: AbstractInsnNode): Option[MethodInsnNode] = {
       if (insn == null) None
-      else insn match {
-        case mi: MethodInsnNode =>
-          if (such(mi) && noMoreInvoke(insn.getNext)) Some(mi)
-          else None
-        case _ =>
-          find(insn.getNext)
-      }
+      else
+        insn match {
+          case mi: MethodInsnNode =>
+            if (such(mi) && noMoreInvoke(insn.getNext)) Some(mi)
+            else None
+          case _ =>
+            find(insn.getNext)
+        }
     }
     find(method.instructions.getFirst)
   }
@@ -223,13 +243,18 @@ object BytecodeUtils {
       instructions.insert(jump, getPop(1))
     } else {
       // we can't remove JSR: its execution does not only jump, it also adds a return address to the stack
-      assert(jump.getOpcode == GOTO, s"Cannot remove JSR instruction in ${method.name} (at ${method.instructions.indexOf(jump)}")
+      assert(
+        jump.getOpcode == GOTO,
+        s"Cannot remove JSR instruction in ${method.name} (at ${method.instructions.indexOf(jump)}"
+      )
     }
     instructions.remove(jump)
   }
 
   def finalJumpTarget(source: JumpInsnNode): LabelNode = {
-    @tailrec def followGoto(label: LabelNode, seenLabels: Set[LabelNode]): LabelNode = nextExecutableInstruction(label) match {
+    @tailrec def followGoto(label: LabelNode, seenLabels: Set[LabelNode]): LabelNode = nextExecutableInstruction(
+      label
+    ) match {
       case Some(Goto(dest)) =>
         if (seenLabels(dest.label)) dest.label
         else followGoto(dest.label, seenLabels + dest.label)
@@ -240,14 +265,14 @@ object BytecodeUtils {
   }
 
   def negateJumpOpcode(jumpOpcode: Int): Int = (jumpOpcode: @switch) match {
-    case IFEQ      => IFNE
-    case IFNE      => IFEQ
+    case IFEQ => IFNE
+    case IFNE => IFEQ
 
-    case IFLT      => IFGE
-    case IFGE      => IFLT
+    case IFLT => IFGE
+    case IFGE => IFLT
 
-    case IFGT      => IFLE
-    case IFLE      => IFGT
+    case IFGT => IFLE
+    case IFLE => IFGT
 
     case IF_ICMPEQ => IF_ICMPNE
     case IF_ICMPNE => IF_ICMPEQ
@@ -267,7 +292,7 @@ object BytecodeUtils {
 
   def isSize2LoadOrStore(opcode: Int): Boolean = (opcode: @switch) match {
     case LLOAD | DLOAD | LSTORE | DSTORE => true
-    case _ => false
+    case _                               => false
   }
 
   def getPop(size: Int): InsnNode = {
@@ -275,23 +300,19 @@ object BytecodeUtils {
     new InsnNode(op)
   }
 
-  def instructionResultSize(insn: AbstractInsnNode) = InstructionStackEffect.prod(InstructionStackEffect.forClassfile(insn))
+  def instructionResultSize(insn: AbstractInsnNode) =
+    InstructionStackEffect.prod(InstructionStackEffect.forClassfile(insn))
 
   def loadZeroForTypeSort(sort: Int) = (sort: @switch) match {
-    case Type.BOOLEAN |
-         Type.BYTE |
-         Type.CHAR |
-         Type.SHORT |
-         Type.INT => new InsnNode(ICONST_0)
-    case Type.LONG => new InsnNode(LCONST_0)
-    case Type.FLOAT => new InsnNode(FCONST_0)
-    case Type.DOUBLE => new InsnNode(DCONST_0)
-    case Type.OBJECT => new InsnNode(ACONST_NULL)
+    case Type.BOOLEAN | Type.BYTE | Type.CHAR | Type.SHORT | Type.INT => new InsnNode(ICONST_0)
+    case Type.LONG                                                    => new InsnNode(LCONST_0)
+    case Type.FLOAT                                                   => new InsnNode(FCONST_0)
+    case Type.DOUBLE                                                  => new InsnNode(DCONST_0)
+    case Type.OBJECT                                                  => new InsnNode(ACONST_NULL)
   }
 
-  /**
-   * The number of local variable slots used for parameters and for the `this` reference.
-   */
+  /** The number of local variable slots used for parameters and for the `this` reference.
+    */
   def parametersSize(methodNode: MethodNode): Int = {
     (Type.getArgumentsAndReturnSizes(methodNode.desc) >> 2) - (if (isStaticMethod(methodNode)) 1 else 0)
   }
@@ -310,7 +331,7 @@ object BytecodeUtils {
       case local: LocalVariableNode     =>
         if (local.start == from) local.start = to
         if (local.end == from) local.end = to
-      case handler: TryCatchBlockNode   =>
+      case handler: TryCatchBlockNode =>
         if (handler.start == from) handler.start = to
         if (handler.handler == from) handler.handler = to
         if (handler.end == from) handler.end = to
@@ -329,18 +350,19 @@ object BytecodeUtils {
     }
 
     (roughUpperBound(caller) + roughUpperBound(callee) > maxMethodSizeAfterInline) &&
-      (maxSize(caller) + maxSize(callee) > maxMethodSizeAfterInline)
+    (maxSize(caller) + maxSize(callee) > maxMethodSizeAfterInline)
   }
 
   def cloneLabels(methodNode: MethodNode): Map[LabelNode, LabelNode] = {
-    methodNode.instructions.iterator.asScala.collect({
-      case labelNode: LabelNode => (labelNode, newLabelNode)
-    }).toMap
+    methodNode.instructions.iterator.asScala
+      .collect({ case labelNode: LabelNode =>
+        (labelNode, newLabelNode)
+      })
+      .toMap
   }
 
-  /**
-   * Create a new [[LabelNode]] with a correctly associated [[Label]].
-   */
+  /** Create a new [[LabelNode]] with a correctly associated [[Label]].
+    */
   def newLabelNode: LabelNode = {
     val label = new Label
     val labelNode = new LabelNode1(label)
@@ -348,11 +370,15 @@ object BytecodeUtils {
     labelNode
   }
 
-  /**
-   * Clone the local variable descriptors of `methodNode` and map their `start` and `end` labels
-   * according to the `labelMap`.
-   */
-  def cloneLocalVariableNodes(methodNode: MethodNode, labelMap: Map[LabelNode, LabelNode], calleeMethodName: String, localIndexMap: Int => Int): List[LocalVariableNode] = {
+  /** Clone the local variable descriptors of `methodNode` and map their `start` and `end` labels according to the
+    * `labelMap`.
+    */
+  def cloneLocalVariableNodes(
+      methodNode: MethodNode,
+      labelMap: Map[LabelNode, LabelNode],
+      calleeMethodName: String,
+      localIndexMap: Int => Int
+  ): List[LocalVariableNode] = {
     val res = mutable.ListBuffer.empty[LocalVariableNode]
     for (localVariable <- methodNode.localVariables.iterator.asScala) {
       val newIdx = localIndexMap(localVariable.index)
@@ -380,37 +406,44 @@ object BytecodeUtils {
           localVariable.signature,
           labelMap(localVariable.start),
           labelMap(localVariable.end),
-          newIdx)
+          newIdx
+        )
       }
     }
     res.toList
   }
 
-  /**
-   * Clone the local try/catch blocks of `methodNode` and map their `start` and `end` and `handler`
-   * labels according to the `labelMap`.
-   */
+  /** Clone the local try/catch blocks of `methodNode` and map their `start` and `end` and `handler` labels according to
+    * the `labelMap`.
+    */
   def cloneTryCatchBlockNodes(methodNode: MethodNode, labelMap: Map[LabelNode, LabelNode]): List[TryCatchBlockNode] = {
-    methodNode.tryCatchBlocks.iterator.asScala.map(tryCatch => new TryCatchBlockNode(
-      labelMap(tryCatch.start),
-      labelMap(tryCatch.end),
-      labelMap(tryCatch.handler),
-      tryCatch.`type`
-    )).toList
+    methodNode.tryCatchBlocks.iterator.asScala
+      .map(tryCatch =>
+        new TryCatchBlockNode(
+          labelMap(tryCatch.start),
+          labelMap(tryCatch.end),
+          labelMap(tryCatch.handler),
+          tryCatch.`type`
+        )
+      )
+      .toList
   }
 
-  /**
-   * This method is used by optimizer components to eliminate phantom values of instruction
-   * that load a value of type `Nothing$` or `Null$`. Such values on the stack don't interact well
-   * with stack map frames.
-   *
-   * For example, `opt.getOrElse(throw e)` is re-written to an invocation of the lambda body, a
-   * method with return type `Nothing$`. Similarly for `opt.getOrElse(null)` and `Null$`.
-   *
-   * During bytecode generation this is handled by BCodeBodyBuilder.adapt. See the comment in that
-   * method which explains the issue with such phantom values.
-   */
-  def fixLoadedNothingOrNullValue(loadedType: Type, loadInstr: AbstractInsnNode, methodNode: MethodNode, bTypes: BTypes): Unit = {
+  /** This method is used by optimizer components to eliminate phantom values of instruction that load a value of type
+    * `Nothing$` or `Null$`. Such values on the stack don't interact well with stack map frames.
+    *
+    * For example, `opt.getOrElse(throw e)` is re-written to an invocation of the lambda body, a method with return type
+    * `Nothing$`. Similarly for `opt.getOrElse(null)` and `Null$`.
+    *
+    * During bytecode generation this is handled by BCodeBodyBuilder.adapt. See the comment in that method which
+    * explains the issue with such phantom values.
+    */
+  def fixLoadedNothingOrNullValue(
+      loadedType: Type,
+      loadInstr: AbstractInsnNode,
+      methodNode: MethodNode,
+      bTypes: BTypes
+  ): Unit = {
     if (loadedType == bTypes.coreBTypes.srNothingRef.toASMType) {
       methodNode.instructions.insert(loadInstr, new InsnNode(ATHROW))
     } else if (loadedType == bTypes.coreBTypes.srNullRef.toASMType) {
@@ -420,31 +453,29 @@ object BytecodeUtils {
   }
 
   implicit class AnalyzerExtensions[V <: Value](val analyzer: Analyzer[V]) extends AnyVal {
-    def frameAt(instruction: AbstractInsnNode, methodNode: MethodNode): Frame[V] = analyzer.getFrames()(methodNode.instructions.indexOf(instruction))
+    def frameAt(instruction: AbstractInsnNode, methodNode: MethodNode): Frame[V] =
+      analyzer.getFrames()(methodNode.instructions.indexOf(instruction))
   }
 
   implicit class FrameExtensions[V <: Value](val frame: Frame[V]) extends AnyVal {
-    /**
-     * The value `n` positions down the stack.
-     */
+
+    /** The value `n` positions down the stack.
+      */
     def peekStack(n: Int): V = frame.getStack(frame.getStackSize - 1 - n)
 
-    /**
-     * The index of the current stack top.
-     */
+    /** The index of the current stack top.
+      */
     def stackTop = frame.getLocals + frame.getStackSize - 1
 
-    /**
-     * Gets the value at slot i, where i may be a local or a stack index.
-     */
+    /** Gets the value at slot i, where i may be a local or a stack index.
+      */
     def getValue(i: Int): V = {
       if (i < frame.getLocals) frame.getLocal(i)
       else frame.getStack(i - frame.getLocals)
     }
 
-    /**
-     * Sets the value at slot i, where i may be a local or a stack index.
-     */
+    /** Sets the value at slot i, where i may be a local or a stack index.
+      */
     def setValue(i: Int, value: V): Unit = {
       if (i < frame.getLocals) frame.setLocal(i, value)
       else frame.setStack(i - frame.getLocals, value)

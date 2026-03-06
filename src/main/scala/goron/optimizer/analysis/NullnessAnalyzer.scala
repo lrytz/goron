@@ -7,7 +7,17 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{BTypes, BTypesFromClassfile, CompilerSettings, CoreBTypes, LabelNode1, MethodNode1, ClassNode1, PerRunInit, PostProcessor}
+import goron.optimizer.{
+  BTypes,
+  BTypesFromClassfile,
+  CompilerSettings,
+  CoreBTypes,
+  LabelNode1,
+  MethodNode1,
+  ClassNode1,
+  PerRunInit,
+  PostProcessor
+}
 
 import java.util
 
@@ -19,32 +29,30 @@ import goron.optimizer.BTypes.InternalName
 import goron.optimizer.opt.BytecodeUtils._
 import goron.optimizer.analysis.BackendUtils._
 
-/**
- * See the package object `analysis` for details on the ASM analysis framework.
- *
- * Some notes on nullness analysis.
- *
- * For an instance method, `this` is non-null at entry. So we have to return a NotNull value when
- * the analyzer is initializing the first frame of a method (see above). This required a change of
- * the analyzer: before it would simply call `interpreter.newValue`, where we don't have the
- * required context. See https://github.com/scala/scala-asm/commit/8133d75032.
- *
- * After some operations we know that a certain value is not null (e.g. the receiver of an instance
- * call). However, the receiver is an value on the stack and consumed while interpreting the
- * instruction - so we can only gain some knowledge if we know that the receiver was an alias of
- * some other local variable or stack slot. Therefore we use the AliasingFrame class.
- */
+/** See the package object `analysis` for details on the ASM analysis framework.
+  *
+  * Some notes on nullness analysis.
+  *
+  * For an instance method, `this` is non-null at entry. So we have to return a NotNull value when the analyzer is
+  * initializing the first frame of a method (see above). This required a change of the analyzer: before it would simply
+  * call `interpreter.newValue`, where we don't have the required context. See
+  * https://github.com/scala/scala-asm/commit/8133d75032.
+  *
+  * After some operations we know that a certain value is not null (e.g. the receiver of an instance call). However, the
+  * receiver is an value on the stack and consumed while interpreting the instruction - so we can only gain some
+  * knowledge if we know that the receiver was an alias of some other local variable or stack slot. Therefore we use the
+  * AliasingFrame class.
+  */
 
-/**
- * Represents the nullness state for a local variable or stack value.
- *
- * Note that nullness of primitive values is not tracked, it will be always unknown.
- */
+/** Represents the nullness state for a local variable or stack value.
+  *
+  * Note that nullness of primitive values is not tracked, it will be always unknown.
+  */
 sealed abstract class NullnessValue(final val isSize2: Boolean) extends Value {
-  /**
-   * The size of the slot described by this value. Cannot be 0 because no values are allocated
-   * for void-typed slots, see NullnessInterpreter.newValue.
-   **/
+
+  /** The size of the slot described by this value. Cannot be 0 because no values are allocated for void-typed slots,
+    * see NullnessInterpreter.newValue.
+    */
   def getSize: Int = if (isSize2) 2 else 1
 
   def merge(other: NullnessValue) = {
@@ -58,17 +66,21 @@ sealed abstract class NullnessValue(final val isSize2: Boolean) extends Value {
   def invert: NullnessValue = if (this == NullValue) NotNullValue else if (this == NotNullValue) NullValue else this
 }
 
-object NullValue     extends NullnessValue(isSize2 = false) { override def toString = "Null"     }
+object NullValue extends NullnessValue(isSize2 = false) { override def toString = "Null" }
 object UnknownValue1 extends NullnessValue(isSize2 = false) { override def toString = "Unknown1" }
-object UnknownValue2 extends NullnessValue(isSize2 = true ) { override def toString = "Unknown2" }
-object NotNullValue  extends NullnessValue(isSize2 = false) { override def toString = "NotNull"  }
+object UnknownValue2 extends NullnessValue(isSize2 = true) { override def toString = "Unknown2" }
+object NotNullValue extends NullnessValue(isSize2 = false) { override def toString = "NotNull" }
 
 object NullnessValue {
   def unknown(isSize2: Boolean) = if (isSize2) UnknownValue2 else UnknownValue1
   def unknown(insn: AbstractInsnNode) = if (instructionResultSize(insn) == 2) UnknownValue2 else UnknownValue1
 }
 
-final class NullnessInterpreter(knownNonNullInvocation: MethodInsnNode => Boolean, modulesNonNull: Boolean, method: MethodNode) extends Interpreter[NullnessValue](Opcodes.ASM5) {
+final class NullnessInterpreter(
+    knownNonNullInvocation: MethodInsnNode => Boolean,
+    modulesNonNull: Boolean,
+    method: MethodNode
+) extends Interpreter[NullnessValue](Opcodes.ASM5) {
   def newValue(tp: Type): NullnessValue = {
     // ASM loves giving semantics to null. The behavior here is the same as in SourceInterpreter,
     // which is provided by the framework.
@@ -80,7 +92,7 @@ final class NullnessInterpreter(knownNonNullInvocation: MethodInsnNode => Boolea
     // (2) `tp` may also be `null`. When creating the initial frame, the analyzer invokes
     //     `newValue(null)` for each local variable. We have to return a value of size 1.
     if (tp == Type.VOID_TYPE) null // (1)
-    else NullnessValue.unknown(isSize2 = tp != null /*(2)*/ && tp.getSize == 2 )
+    else NullnessValue.unknown(isSize2 = tp != null /*(2)*/ && tp.getSize == 2)
   }
 
   override def newParameterValue(isInstanceMethod: Boolean, local: Int, tp: Type): NullnessValue = {
@@ -98,10 +110,11 @@ final class NullnessInterpreter(knownNonNullInvocation: MethodInsnNode => Boolea
   def newOperation(insn: AbstractInsnNode): NullnessValue = (insn.getOpcode: @switch) match {
     case Opcodes.ACONST_NULL => NullValue
 
-    case Opcodes.LDC => insn.asInstanceOf[LdcInsnNode].cst match {
-      case _: String | _: Type => NotNullValue
-      case _ => NullnessValue.unknown(insn)
-    }
+    case Opcodes.LDC =>
+      insn.asInstanceOf[LdcInsnNode].cst match {
+        case _: String | _: Type => NotNullValue
+        case _                   => NullnessValue.unknown(insn)
+      }
 
     case Opcodes.GETSTATIC =>
       val fi = insn.asInstanceOf[FieldInsnNode]
@@ -117,8 +130,7 @@ final class NullnessInterpreter(knownNonNullInvocation: MethodInsnNode => Boolea
   def unaryOperation(insn: AbstractInsnNode, value: NullnessValue): NullnessValue = (insn.getOpcode: @switch) match {
     case Opcodes.CHECKCAST => value
 
-    case Opcodes.NEWARRAY |
-         Opcodes.ANEWARRAY => NotNullValue
+    case Opcodes.NEWARRAY | Opcodes.ANEWARRAY => NotNullValue
 
     case _ => NullnessValue.unknown(insn)
   }
@@ -127,7 +139,12 @@ final class NullnessInterpreter(knownNonNullInvocation: MethodInsnNode => Boolea
     NullnessValue.unknown(insn)
   }
 
-  def ternaryOperation(insn: AbstractInsnNode, value1: NullnessValue, value2: NullnessValue, value3: NullnessValue): NullnessValue = UnknownValue1
+  def ternaryOperation(
+      insn: AbstractInsnNode,
+      value1: NullnessValue,
+      value2: NullnessValue,
+      value3: NullnessValue
+  ): NullnessValue = UnknownValue1
 
   def naryOperation(insn: AbstractInsnNode, values: util.List[_ <: NullnessValue]): NullnessValue = insn match {
     case mi: MethodInsnNode if knownNonNullInvocation(mi) =>
@@ -172,31 +189,17 @@ class NullnessFrame(nLocals: Int, nStack: Int) extends AliasingFrame[NullnessVal
 
     ifNullAliases = insn.getOpcode match {
       case IFNULL | IFNONNULL => aliasesOf(this.stackTop)
-      case _ => null
+      case _                  => null
     }
 
     // get the alias set the object that is known to be not-null after this operation.
     // alias sets are mutable / mutated, so after super.execute, this set contains the remaining
     // aliases of the value that becomes not-null.
     val nullCheckedAliases: AliasSet = (insn.getOpcode: @switch) match {
-      case IALOAD |
-           LALOAD |
-           FALOAD |
-           DALOAD |
-           AALOAD |
-           BALOAD |
-           CALOAD |
-           SALOAD =>
+      case IALOAD | LALOAD | FALOAD | DALOAD | AALOAD | BALOAD | CALOAD | SALOAD =>
         aliasesOf(this.stackTop - 1)
 
-      case IASTORE |
-           FASTORE |
-           AASTORE |
-           BASTORE |
-           CASTORE |
-           SASTORE |
-           LASTORE |
-           DASTORE =>
+      case IASTORE | FASTORE | AASTORE | BASTORE | CASTORE | SASTORE | LASTORE | DASTORE =>
         aliasesOf(this.stackTop - 2)
 
       case GETFIELD =>
@@ -205,9 +208,7 @@ class NullnessFrame(nLocals: Int, nStack: Int) extends AliasingFrame[NullnessVal
       case PUTFIELD =>
         aliasesOf(this.stackTop - 1)
 
-      case INVOKEVIRTUAL |
-           INVOKESPECIAL |
-           INVOKEINTERFACE =>
+      case INVOKEVIRTUAL | INVOKESPECIAL | INVOKEINTERFACE =>
         val desc = insn.asInstanceOf[MethodInsnNode].desc
         val numArgs = Type.getArgumentTypes(desc).length
         aliasesOf(this.stackTop - numArgs)
@@ -227,9 +228,7 @@ class NullnessFrame(nLocals: Int, nStack: Int) extends AliasingFrame[NullnessVal
         }
         res
 
-      case ARRAYLENGTH |
-           MONITORENTER |
-           MONITOREXIT =>
+      case ARRAYLENGTH | MONITORENTER | MONITOREXIT =>
         aliasesOf(this.stackTop)
 
       case _ =>
@@ -243,13 +242,24 @@ class NullnessFrame(nLocals: Int, nStack: Int) extends AliasingFrame[NullnessVal
   }
 }
 
-class NullnessAnalyzerImpl(methodNode: MethodNode, knownNonNullInvocation: MethodInsnNode => Boolean, modulesNonNull: Boolean)
-  extends Analyzer[NullnessValue](new NullnessInterpreter(knownNonNullInvocation, modulesNonNull, methodNode)) {
+class NullnessAnalyzerImpl(
+    methodNode: MethodNode,
+    knownNonNullInvocation: MethodInsnNode => Boolean,
+    modulesNonNull: Boolean
+) extends Analyzer[NullnessValue](new NullnessInterpreter(knownNonNullInvocation, modulesNonNull, methodNode)) {
   // override the `newFrame` methods to make sure the analyzer uses NullnessFrames.
   override def newFrame(nLocals: Int, nStack: Int): NullnessFrame = new NullnessFrame(nLocals, nStack)
   override def newFrame(src: Frame[_ <: NullnessValue]): NullnessFrame = new NullnessFrame(src)
 }
 
-class NullnessAnalyzer(methodNode: MethodNode, classInternalName: InternalName, knownNonNullInvocation: MethodInsnNode => Boolean, modulesNonNull: Boolean)
-  extends AsmAnalyzer(methodNode, classInternalName, new NullnessAnalyzerImpl(methodNode, knownNonNullInvocation, modulesNonNull))
+class NullnessAnalyzer(
+    methodNode: MethodNode,
+    classInternalName: InternalName,
+    knownNonNullInvocation: MethodInsnNode => Boolean,
+    modulesNonNull: Boolean
+) extends AsmAnalyzer(
+      methodNode,
+      classInternalName,
+      new NullnessAnalyzerImpl(methodNode, knownNonNullInvocation, modulesNonNull)
+    )
     with AliasingAsmAnalyzerMarker

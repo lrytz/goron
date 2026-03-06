@@ -13,10 +13,9 @@ import scala.tools.asm.tree.ClassNode
 import goron.optimizer.analysis.BackendUtils
 import goron.optimizer.opt._
 
-/**
- * Implements late stages of the backend that don't depend on a Global instance, i.e.,
- * optimizations, post-processing and classfile serialization and writing.
- */
+/** Implements late stages of the backend that don't depend on a Global instance, i.e., optimizations, post-processing
+  * and classfile serialization and writing.
+  */
 abstract class PostProcessor extends PerRunInit {
   self =>
   val bTypes: BTypes
@@ -26,14 +25,24 @@ abstract class PostProcessor extends PerRunInit {
   def compilerSettings: CompilerSettings = bTypes.compilerSettings
   def backendReporting: BackendReporting.Reporter = bTypes.backendReporting
 
-  lazy val backendUtils        : BackendUtils        { val postProcessor: self.type } = new BackendUtils        { val postProcessor: self.type = self }
-  lazy val byteCodeRepository  : ByteCodeRepository  { val postProcessor: self.type } = new ByteCodeRepository  { val postProcessor: self.type = self }
-  lazy val localOpt            : LocalOpt            { val postProcessor: self.type } = new LocalOpt            { val postProcessor: self.type = self }
-  lazy val inliner             : Inliner             { val postProcessor: self.type } = new Inliner             { val postProcessor: self.type = self }
-  lazy val inlinerHeuristics   : InlinerHeuristics   { val postProcessor: self.type } = new InlinerHeuristics   { val postProcessor: self.type = self }
-  lazy val closureOptimizer    : ClosureOptimizer    { val postProcessor: self.type } = new ClosureOptimizer    { val postProcessor: self.type = self }
-  lazy val callGraph           : CallGraph           { val postProcessor: self.type } = new CallGraph           { val postProcessor: self.type = self }
-  lazy val bTypesFromClassfile : BTypesFromClassfile { val postProcessor: self.type } = new BTypesFromClassfile { val postProcessor: self.type = self }
+  lazy val backendUtils: BackendUtils { val postProcessor: self.type } = new BackendUtils {
+    val postProcessor: self.type = self
+  }
+  lazy val byteCodeRepository: ByteCodeRepository { val postProcessor: self.type } = new ByteCodeRepository {
+    val postProcessor: self.type = self
+  }
+  lazy val localOpt: LocalOpt { val postProcessor: self.type } = new LocalOpt { val postProcessor: self.type = self }
+  lazy val inliner: Inliner { val postProcessor: self.type } = new Inliner { val postProcessor: self.type = self }
+  lazy val inlinerHeuristics: InlinerHeuristics { val postProcessor: self.type } = new InlinerHeuristics {
+    val postProcessor: self.type = self
+  }
+  lazy val closureOptimizer: ClosureOptimizer { val postProcessor: self.type } = new ClosureOptimizer {
+    val postProcessor: self.type = self
+  }
+  lazy val callGraph: CallGraph { val postProcessor: self.type } = new CallGraph { val postProcessor: self.type = self }
+  lazy val bTypesFromClassfile: BTypesFromClassfile { val postProcessor: self.type } = new BTypesFromClassfile {
+    val postProcessor: self.type = self
+  }
 
   override def initialize(): Unit = {
     super.initialize()
@@ -42,10 +51,9 @@ abstract class PostProcessor extends PerRunInit {
     byteCodeRepository.initialize()
   }
 
-  /**
-   * Run global optimizations: build call graph, inline, optimize closures.
-   * Called by goron after all classes have been added to the ByteCodeRepository.
-   */
+  /** Run global optimizations: build call graph, inline, optimize closures. Called by goron after all classes have been
+    * added to the ByteCodeRepository.
+    */
   def runGlobalOptimizations(classNodes: Iterable[ClassNode]): Unit = {
     if (compilerSettings.optAddToBytecodeRepository) {
       if (compilerSettings.optBuildCallGraph) {
@@ -76,10 +84,9 @@ abstract class PostProcessor extends PerRunInit {
     cw.toByteArray
   }
 
-  /**
-   * An asm ClassWriter that uses ClassBType.jvmWiseLUB to compute the common superclass of class
-   * types. This operation is used for computing stack map frames.
-   */
+  /** An asm ClassWriter that uses ClassBType.jvmWiseLUB to compute the common superclass of class types. This operation
+    * is used for computing stack map frames.
+    */
   final class ClassWriterWithBTypeLub(flags: Int) extends ClassWriter(flags) {
     private def resolve(iname: String): ClassBType = {
       val cached = cachedClassBType(iname)

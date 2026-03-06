@@ -13,50 +13,49 @@ import scala.tools.asm
 import scala.tools.asm.{Handle, Opcodes, Type}
 import scala.tools.asm.tree._
 
-/**
- * Whole-program reachability analysis in two phases:
- *
- * Phase 1 (method-level BFS): Starting from entry point classes, follows method
- * calls at method granularity. If a class has 100 methods but only 1 is called,
- * only that method's references are followed. This determines the "execution-reachable"
- * set — classes whose code will actually run.
- *
- * Phase 2 (load closure): For each execution-reachable class, ensures all classes
- * referenced anywhere in its classfile (method bodies, descriptors, constant pool)
- * are also present. These "load-reachable" classes are needed for JVM class loading
- * and verification, but their own method bodies are NOT traversed — only their
- * type hierarchy and descriptor types are followed transitively.
- *
- * This two-phase approach eliminates unreferenced classes aggressively while
- * ensuring retained classes can actually be loaded by the JVM.
- */
+/** Whole-program reachability analysis in two phases:
+  *
+  * Phase 1 (method-level BFS): Starting from entry point classes, follows method calls at method granularity. If a
+  * class has 100 methods but only 1 is called, only that method's references are followed. This determines the
+  * "execution-reachable" set — classes whose code will actually run.
+  *
+  * Phase 2 (load closure): For each execution-reachable class, ensures all classes referenced anywhere in its classfile
+  * (method bodies, descriptors, constant pool) are also present. These "load-reachable" classes are needed for JVM
+  * class loading and verification, but their own method bodies are NOT traversed — only their type hierarchy and
+  * descriptor types are followed transitively.
+  *
+  * This two-phase approach eliminates unreferenced classes aggressively while ensuring retained classes can actually be
+  * loaded by the JVM.
+  */
 object ReachabilityAnalysis {
 
-  /**
-   * Compute the set of reachable class internal names, starting from the given entry points.
-   *
-   * @param classNodes all classes in the program
-   * @param entryPoints internal names of entry point classes (all their methods are roots)
-   * @return set of reachable class internal names
-   */
+  /** Compute the set of reachable class internal names, starting from the given entry points.
+    *
+    * @param classNodes
+    *   all classes in the program
+    * @param entryPoints
+    *   internal names of entry point classes (all their methods are roots)
+    * @return
+    *   set of reachable class internal names
+    */
   def reachableClasses(
-    classNodes: Iterable[ClassNode],
-    entryPoints: Set[String]
+      classNodes: Iterable[ClassNode],
+      entryPoints: Set[String]
   ): Set[String] = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
     val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
     loadClosure(execReachable, reachableMethods, classByName)
   }
 
-  /**
-   * Like `reachableClasses`, but also returns the set of reachable methods and
-   * the execution-reachable class set (before load closure).
-   *
-   * @return (allReachableClasses, execReachableClasses, reachableMethods)
-   */
+  /** Like `reachableClasses`, but also returns the set of reachable methods and the execution-reachable class set
+    * (before load closure).
+    *
+    * @return
+    *   (allReachableClasses, execReachableClasses, reachableMethods)
+    */
   def reachableClassesAndMethods(
-    classNodes: Iterable[ClassNode],
-    entryPoints: Set[String]
+      classNodes: Iterable[ClassNode],
+      entryPoints: Set[String]
   ): (Set[String], Set[String], Set[(String, String, String)]) = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
     val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
@@ -64,17 +63,14 @@ object ReachabilityAnalysis {
     (allReachable, execReachable, reachableMethods)
   }
 
-  /**
-   * Remove unreachable methods from ClassNodes in-place.
-   * Only strips from execution-reachable classes (not load-closure-only).
-   * Never strips abstract, native, or bridge methods, nor methods that
-   * override/implement methods from classes outside the analyzed set
-   * (e.g. JDK classes whose method bodies we can't trace).
-   */
+  /** Remove unreachable methods from ClassNodes in-place. Only strips from execution-reachable classes (not
+    * load-closure-only). Never strips abstract, native, or bridge methods, nor methods that override/implement methods
+    * from classes outside the analyzed set (e.g. JDK classes whose method bodies we can't trace).
+    */
   def stripUnreachableMethods(
-    classNodes: Iterable[ClassNode],
-    reachableMethods: Set[(String, String, String)],
-    execReachableClasses: Set[String],
+      classNodes: Iterable[ClassNode],
+      reachableMethods: Set[(String, String, String)],
+      execReachableClasses: Set[String]
   ): Int = {
     var stripped = 0
     for (cn <- classNodes if execReachableClasses.contains(cn.name)) {
@@ -97,32 +93,52 @@ object ReachabilityAnalysis {
 
   /** Collect method signatures from an external class and its supertypes. */
   private def collectExternalClassMethods(internalName: String): Set[(String, String)] = {
-    collectExternalClassMethodsCached.getOrElseUpdate(internalName, {
-      try {
-        val stream = Thread.currentThread().getContextClassLoader
-          .getResourceAsStream(internalName + ".class")
-        if (stream == null) return Set.empty
-        val bytes = try stream.readAllBytes() finally stream.close()
-        val cr = new asm.ClassReader(bytes)
-        val methods = mutable.Set.empty[(String, String)]
-        val superNames = mutable.ListBuffer.empty[String]
-        cr.accept(new asm.ClassVisitor(Opcodes.ASM9) {
-          override def visit(version: Int, access: Int, name: String, signature: String,
-              superName: String, interfaces: Array[String]): Unit = {
-            if (superName != null) superNames += superName
-            if (interfaces != null) superNames ++= interfaces
-          }
-          override def visitMethod(access: Int, name: String, descriptor: String,
-              signature: String, exceptions: Array[String]): asm.MethodVisitor = {
-            methods += ((name, descriptor))
-            null
-          }
-        }, asm.ClassReader.SKIP_CODE | asm.ClassReader.SKIP_DEBUG | asm.ClassReader.SKIP_FRAMES)
-        methods.toSet ++ superNames.flatMap(collectExternalClassMethods)
-      } catch {
-        case _: Exception => Set.empty
+    collectExternalClassMethodsCached.getOrElseUpdate(
+      internalName, {
+        try {
+          val stream = Thread
+            .currentThread()
+            .getContextClassLoader
+            .getResourceAsStream(internalName + ".class")
+          if (stream == null) return Set.empty
+          val bytes =
+            try stream.readAllBytes()
+            finally stream.close()
+          val cr = new asm.ClassReader(bytes)
+          val methods = mutable.Set.empty[(String, String)]
+          val superNames = mutable.ListBuffer.empty[String]
+          cr.accept(
+            new asm.ClassVisitor(Opcodes.ASM9) {
+              override def visit(
+                  version: Int,
+                  access: Int,
+                  name: String,
+                  signature: String,
+                  superName: String,
+                  interfaces: Array[String]
+              ): Unit = {
+                if (superName != null) superNames += superName
+                if (interfaces != null) superNames ++= interfaces
+              }
+              override def visitMethod(
+                  access: Int,
+                  name: String,
+                  descriptor: String,
+                  signature: String,
+                  exceptions: Array[String]
+              ): asm.MethodVisitor = {
+                methods += ((name, descriptor))
+                null
+              }
+            },
+            asm.ClassReader.SKIP_CODE | asm.ClassReader.SKIP_DEBUG | asm.ClassReader.SKIP_FRAMES
+          )
+          methods.toSet ++ superNames.flatMap(collectExternalClassMethods)
+        } catch {
+          case _: Exception => Set.empty
+        }
       }
-    })
+    )
   }
 
   private val collectExternalClassMethodsCached = mutable.Map.empty[String, Set[(String, String)]]
@@ -132,8 +148,8 @@ object ReachabilityAnalysis {
   // ---------------------------------------------------------------------------
 
   private def methodLevelBFS(
-    classByName: Map[String, ClassNode],
-    entryPoints: Set[String]
+      classByName: Map[String, ClassNode],
+      entryPoints: Set[String]
   ): (Set[String], Set[(String, String, String)]) = {
     // Build subclass map for virtual dispatch resolution
     val subclasses = mutable.Map.empty[String, mutable.Set[String]]
@@ -141,8 +157,7 @@ object ReachabilityAnalysis {
       if (cn.superName != null)
         subclasses.getOrElseUpdate(cn.superName, mutable.Set.empty) += cn.name
       if (cn.interfaces != null)
-        cn.interfaces.asScala.foreach(iface =>
-          subclasses.getOrElseUpdate(iface, mutable.Set.empty) += cn.name)
+        cn.interfaces.asScala.foreach(iface => subclasses.getOrElseUpdate(iface, mutable.Set.empty) += cn.name)
     }
 
     val reachableClasses = mutable.Set.empty[String]
@@ -230,16 +245,20 @@ object ReachabilityAnalysis {
     // can call them (e.g. JDK calling abstract method implementations via virtual dispatch).
     val externalMethodsCache = mutable.Map.empty[String, Set[(String, String)]]
     def externalMethods(className: String): Set[(String, String)] = {
-      externalMethodsCache.getOrElseUpdate(className, {
-        classByName.get(className) match {
-          case Some(cn) =>
-            val fromSuper = if (cn.superName != null) externalMethods(cn.superName) else Set.empty[(String, String)]
-            val fromIfaces = if (cn.interfaces != null) cn.interfaces.asScala.flatMap(externalMethods).toSet else Set.empty[(String, String)]
-            fromSuper ++ fromIfaces
-          case None =>
-            collectExternalClassMethods(className)
+      externalMethodsCache.getOrElseUpdate(
+        className, {
+          classByName.get(className) match {
+            case Some(cn) =>
+              val fromSuper = if (cn.superName != null) externalMethods(cn.superName) else Set.empty[(String, String)]
+              val fromIfaces =
+                if (cn.interfaces != null) cn.interfaces.asScala.flatMap(externalMethods).toSet
+                else Set.empty[(String, String)]
+              fromSuper ++ fromIfaces
+            case None =>
+              collectExternalClassMethods(className)
+          }
         }
-      })
+      )
     }
 
     // Seed: all methods in entry point classes
@@ -258,7 +277,8 @@ object ReachabilityAnalysis {
           if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueueClass)
 
           if (cn.methods != null) {
-            cn.methods.asScala.filter(_.name == "<clinit>")
+            cn.methods.asScala
+              .filter(_.name == "<clinit>")
               .foreach(mn => enqueueMethod(className, mn.name, mn.desc))
 
             // Methods that override external (non-analyzed) class methods are implicitly
@@ -282,8 +302,10 @@ object ReachabilityAnalysis {
 
       while (methodWorklist.nonEmpty) {
         val (className, methodName, methodDesc) = methodWorklist.dequeue()
-        for (cn <- classByName.get(className);
-             mn <- cn.methods.asScala.find(m => m.name == methodName && m.desc == methodDesc))
+        for (
+          cn <- classByName.get(className);
+          mn <- cn.methods.asScala.find(m => m.name == methodName && m.desc == methodDesc)
+        )
           processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall, markInstantiated)
       }
     }
@@ -295,16 +317,14 @@ object ReachabilityAnalysis {
   // Phase 2: Load closure
   // ---------------------------------------------------------------------------
 
-  /**
-   * Ensure all classes referenced by execution-reachable classes are also included.
-   * These "load-reachable" classes are needed for JVM class loading/verification.
-   * For load-reachable classes, we follow their type hierarchy and descriptor types
-   * but NOT their method bodies.
-   */
+  /** Ensure all classes referenced by execution-reachable classes are also included. These "load-reachable" classes are
+    * needed for JVM class loading/verification. For load-reachable classes, we follow their type hierarchy and
+    * descriptor types but NOT their method bodies.
+    */
   private def loadClosure(
-    execReachable: Set[String],
-    reachableMethods: Set[(String, String, String)],
-    classByName: Map[String, ClassNode],
+      execReachable: Set[String],
+      reachableMethods: Set[(String, String, String)],
+      classByName: Map[String, ClassNode]
   ): Set[String] = {
     val allReachable = mutable.Set.empty[String]
     allReachable ++= execReachable
@@ -327,17 +347,16 @@ object ReachabilityAnalysis {
     allReachable.toSet
   }
 
-  /** Collect class references from a ClassNode needed for JVM loading.
-    * For execution-reachable classes, we only need supertypes to be present —
-    * field types, method descriptors, and instruction references are verified
-    * lazily by the JVM when actually accessed.
+  /** Collect class references from a ClassNode needed for JVM loading. For execution-reachable classes, we only need
+    * supertypes to be present — field types, method descriptors, and instruction references are verified lazily by the
+    * JVM when actually accessed.
     */
   private def collectAllClassRefs(
-    cn: ClassNode,
-    reachableMethods: Set[(String, String, String)],
-    reachable: mutable.Set[String],
-    worklist: mutable.Queue[String],
-    classByName: Map[String, ClassNode],
+      cn: ClassNode,
+      reachableMethods: Set[(String, String, String)],
+      reachable: mutable.Set[String],
+      worklist: mutable.Queue[String],
+      classByName: Map[String, ClassNode]
   ): Unit = {
     def enqueue(name: String): Unit = {
       if (!reachable.contains(name) && classByName.contains(name)) {
@@ -351,14 +370,14 @@ object ReachabilityAnalysis {
     if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
   }
 
-  /** Collect class references that are needed for a class to be LOADABLE (not executable).
-    * Only supertypes are eagerly required by the JVM.
+  /** Collect class references that are needed for a class to be LOADABLE (not executable). Only supertypes are eagerly
+    * required by the JVM.
     */
   private def collectLoadDeps(
-    cn: ClassNode,
-    reachable: mutable.Set[String],
-    worklist: mutable.Queue[String],
-    classByName: Map[String, ClassNode],
+      cn: ClassNode,
+      reachable: mutable.Set[String],
+      worklist: mutable.Queue[String],
+      classByName: Map[String, ClassNode]
   ): Unit = {
     def enqueue(name: String): Unit = {
       if (!reachable.contains(name) && classByName.contains(name)) {
@@ -435,11 +454,11 @@ object ReachabilityAnalysis {
   }
 
   private def processMethodRefs(
-    mn: MethodNode,
-    enqueueClass: String => Unit,
-    resolveAndEnqueueMethod: (String, String, String) => Unit,
-    enqueueVirtualCall: (String, String, String) => Unit,
-    markInstantiated: String => Unit,
+      mn: MethodNode,
+      enqueueClass: String => Unit,
+      resolveAndEnqueueMethod: (String, String, String) => Unit,
+      enqueueVirtualCall: (String, String, String) => Unit,
+      markInstantiated: String => Unit
   ): Unit = {
     addMethodDescClassRefs(mn.desc, enqueueClass)
     if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueueClass)
@@ -517,7 +536,7 @@ object ReachabilityAnalysis {
           if (end > i) { enqueue(desc.substring(i + 1, end)); i = end + 1 }
           else return
         case '[' => i += 1
-        case _ => return
+        case _   => return
       }
     }
   }

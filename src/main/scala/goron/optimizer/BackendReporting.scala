@@ -11,11 +11,10 @@ import scala.tools.asm.tree.{AbstractInsnNode, MethodNode}
 import goron.optimizer.BTypes.InternalName
 import scala.util.control.ControlThrowable
 
-/**
- * Utilities for error reporting.
- *
- * Defines some utility methods to make error reporting with Either easier.
- */
+/** Utilities for error reporting.
+  *
+  * Defines some utility methods to make error reporting with Either easier.
+  */
 object BackendReporting {
   def methodSignature(classInternalName: InternalName, name: String, desc: String) = {
     classInternalName + "::" + name + desc
@@ -33,24 +32,20 @@ object BackendReporting {
     /** Get the value, fail with an assertion if this is an error. */
     def get: B = v.fold(a => assertionError(s"$a"), identity)
 
-    /**
-     * Get the right value of an `Either` by throwing a potential error message. Can simplify the
-     * implementation of methods that act on multiple `Either` instances. Instead of flat-mapping,
-     * the first error can be collected as
-     *
-     *     tryEither {
-     *       eitherOne.orThrow .... eitherTwo.orThrow ... eitherThree.orThrow
-     *     }
-     */
+    /** Get the right value of an `Either` by throwing a potential error message. Can simplify the implementation of
+      * methods that act on multiple `Either` instances. Instead of flat-mapping, the first error can be collected as
+      *
+      * tryEither { eitherOne.orThrow .... eitherTwo.orThrow ... eitherThree.orThrow }
+      */
     def orThrow: B = v.fold(a => throw Invalid(a), identity)
   }
 
   case class Invalid[A](e: A) extends ControlThrowable
 
-  /**
-   * See documentation of orThrow above.
-   */
-  def tryEither[A, B](op: => Either[A, B]): Either[A, B] = try { op } catch { case Invalid(e) => Left(e.asInstanceOf[A]) }
+  /** See documentation of orThrow above.
+    */
+  def tryEither[A, B](op: => Either[A, B]): Either[A, B] = try { op }
+  catch { case Invalid(e) => Left(e.asInstanceOf[A]) }
 
   sealed trait OptimizerWarning {
     def emitWarning(settings: CompilerSettings): Boolean
@@ -69,15 +64,17 @@ object BackendReporting {
     override def toString = this match {
       case ClassNotFound(internalName, definedInJavaSource) =>
         s"The classfile for $internalName could not be found on the compilation classpath." + {
-          if (definedInJavaSource) "\nThe class is defined in a Java source file that is being compiled (mixed compilation), therefore no bytecode is available."
+          if (definedInJavaSource)
+            "\nThe class is defined in a Java source file that is being compiled (mixed compilation), therefore no bytecode is available."
           else ""
         }
 
       case MethodNotFound(name, descriptor, ownerInternalName, missingClass) =>
         val missingClassWarning = missingClass match {
-          case None => ""
+          case None    => ""
           case Some(c) =>
-            if (c.definedInJavaSource) s"\nNote that class ${c.internalName} is defined in a Java source (mixed compilation), no bytecode is available."
+            if (c.definedInJavaSource)
+              s"\nNote that class ${c.internalName} is defined in a Java source (mixed compilation), no bytecode is available."
             else s"\nNote that class ${c.internalName} could not be found on the classpath."
         }
         s"The method $name$descriptor could not be found in the class $ownerInternalName or any of its parents." + missingClassWarning
@@ -101,11 +98,22 @@ object BackendReporting {
     }
   }
 
-  final case class ClassNotFound(internalName: InternalName, definedInJavaSource: Boolean) extends MissingBytecodeWarning
-  final case class MethodNotFound(name: String, descriptor: String, ownerInternalNameOrArrayDescriptor: InternalName, missingClass: Option[ClassNotFound]) extends MissingBytecodeWarning {
+  final case class ClassNotFound(internalName: InternalName, definedInJavaSource: Boolean)
+      extends MissingBytecodeWarning
+  final case class MethodNotFound(
+      name: String,
+      descriptor: String,
+      ownerInternalNameOrArrayDescriptor: InternalName,
+      missingClass: Option[ClassNotFound]
+  ) extends MissingBytecodeWarning {
     def isArrayMethod = ownerInternalNameOrArrayDescriptor.charAt(0) == '['
   }
-  final case class FieldNotFound(name: String, descriptor: String, ownerInternalName: InternalName, missingClass: Option[ClassNotFound]) extends MissingBytecodeWarning
+  final case class FieldNotFound(
+      name: String,
+      descriptor: String,
+      ownerInternalName: InternalName,
+      missingClass: Option[ClassNotFound]
+  ) extends MissingBytecodeWarning
 
   sealed trait NoClassBTypeInfo extends OptimizerWarning {
     override def toString = this match {
@@ -125,9 +133,8 @@ object BackendReporting {
   final case class NoClassBTypeInfoMissingBytecode(cause: MissingBytecodeWarning) extends NoClassBTypeInfo
   final case class NoClassBTypeInfoClassSymbolInfoFailedSI9111(classFullName: String) extends NoClassBTypeInfo
 
-  /**
-   * Used in the CallGraph for nodes where an issue occurred determining the callee information.
-   */
+  /** Used in the CallGraph for nodes where an issue occurred determining the callee information.
+    */
   sealed trait CalleeInfoWarning extends OptimizerWarning {
     def declarationClass: InternalName
     def name: String
@@ -148,18 +155,33 @@ object BackendReporting {
     }
 
     def emitWarning(settings: CompilerSettings): Boolean = this match {
-      case MethodInlineInfoIncomplete(_, _, _, cause)               => cause.emitWarning(settings)
+      case MethodInlineInfoIncomplete(_, _, _, cause) => cause.emitWarning(settings)
 
-      case MethodInlineInfoMissing(_, _, _, Some(cause))            => cause.emitWarning(settings)
-      case MethodInlineInfoMissing(_, _, _, None)                   => settings.optWarningNoInlineMissingBytecode
+      case MethodInlineInfoMissing(_, _, _, Some(cause)) => cause.emitWarning(settings)
+      case MethodInlineInfoMissing(_, _, _, None)        => settings.optWarningNoInlineMissingBytecode
 
-      case MethodInlineInfoError(_, _, _, cause)                    => cause.emitWarning(settings)
+      case MethodInlineInfoError(_, _, _, cause) => cause.emitWarning(settings)
     }
   }
 
-  final case class MethodInlineInfoIncomplete(declarationClass: InternalName, name: String, descriptor: String, cause: ClassInlineInfoWarning) extends CalleeInfoWarning
-  final case class MethodInlineInfoMissing(declarationClass: InternalName, name: String, descriptor: String, cause: Option[ClassInlineInfoWarning]) extends CalleeInfoWarning
-  final case class MethodInlineInfoError(declarationClass: InternalName, name: String, descriptor: String, cause: NoClassBTypeInfo) extends CalleeInfoWarning
+  final case class MethodInlineInfoIncomplete(
+      declarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      cause: ClassInlineInfoWarning
+  ) extends CalleeInfoWarning
+  final case class MethodInlineInfoMissing(
+      declarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      cause: Option[ClassInlineInfoWarning]
+  ) extends CalleeInfoWarning
+  final case class MethodInlineInfoError(
+      declarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      cause: NoClassBTypeInfo
+  ) extends CalleeInfoWarning
 
   sealed trait CannotInlineWarning extends OptimizerWarning {
     def calleeDeclarationClass: InternalName
@@ -188,7 +210,11 @@ object BackendReporting {
               |$cause""".stripMargin
 
         case MethodWithHandlerCalledOnNonEmptyStack(_, _, _, _, callsiteClass, callsiteName, callsiteDesc) =>
-          s"""|The operand stack at the callsite in ${BackendReporting.methodSignature(callsiteClass, callsiteName, callsiteDesc)} contains more values than the
+          s"""|The operand stack at the callsite in ${BackendReporting.methodSignature(
+               callsiteClass,
+               callsiteName,
+               callsiteDesc
+             )} contains more values than the
               |arguments expected by the callee $calleeMethodSig. These values would be discarded
               |when entering an exception handler declared in the inlined method.""".stripMargin
 
@@ -204,7 +230,11 @@ object BackendReporting {
          """.stripMargin
 
         case ResultingMethodTooLarge(_, _, _, _, callsiteClass, callsiteName, callsiteDesc) =>
-          s"""The size of the callsite method ${BackendReporting.methodSignature(callsiteClass, callsiteName, callsiteDesc)}
+          s"""The size of the callsite method ${BackendReporting.methodSignature(
+              callsiteClass,
+              callsiteName,
+              callsiteDesc
+            )}
              |would exceed the JVM method size limit after inlining $calleeMethodSig.
          """.stripMargin
       }
@@ -213,34 +243,83 @@ object BackendReporting {
 
     def emitWarning(settings: CompilerSettings): Boolean = {
       settings.optWarningEmitAnyInlineFailed ||
-        annotatedInline && settings.optWarningEmitAtInlineFailed
+      annotatedInline && settings.optWarningEmitAtInlineFailed
     }
   }
-  final case class CalleeNotFinal(calleeDeclarationClass: InternalName, name: String, descriptor: String,  annotatedInline: Boolean) extends CannotInlineWarning
-  final case class IllegalAccessInstructions(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean,
-                                       callsiteClass: InternalName, instructions: List[AbstractInsnNode]) extends CannotInlineWarning
-  final case class IllegalAccessCheckFailed(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean,
-                                      callsiteClass: InternalName, instruction: AbstractInsnNode, cause: OptimizerWarning) extends CannotInlineWarning
-  final case class MethodWithHandlerCalledOnNonEmptyStack(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean,
-                                                    callsiteClass: InternalName, callsiteName: String, callsiteDesc: String) extends CannotInlineWarning
-  final case class SynchronizedMethod(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean) extends CannotInlineWarning
-  final case class NoBytecode(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean) extends CannotInlineWarning
-  final case class StrictfpMismatch(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean,
-                              callsiteClass: InternalName, callsiteName: String, callsiteDesc: String) extends CannotInlineWarning
-  case class ResultingMethodTooLarge(calleeDeclarationClass: InternalName, name: String, descriptor: String, annotatedInline: Boolean,
-                                     callsiteClass: InternalName, callsiteName: String, callsiteDesc: String) extends CannotInlineWarning
+  final case class CalleeNotFinal(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean
+  ) extends CannotInlineWarning
+  final case class IllegalAccessInstructions(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean,
+      callsiteClass: InternalName,
+      instructions: List[AbstractInsnNode]
+  ) extends CannotInlineWarning
+  final case class IllegalAccessCheckFailed(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean,
+      callsiteClass: InternalName,
+      instruction: AbstractInsnNode,
+      cause: OptimizerWarning
+  ) extends CannotInlineWarning
+  final case class MethodWithHandlerCalledOnNonEmptyStack(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean,
+      callsiteClass: InternalName,
+      callsiteName: String,
+      callsiteDesc: String
+  ) extends CannotInlineWarning
+  final case class SynchronizedMethod(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean
+  ) extends CannotInlineWarning
+  final case class NoBytecode(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean
+  ) extends CannotInlineWarning
+  final case class StrictfpMismatch(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean,
+      callsiteClass: InternalName,
+      callsiteName: String,
+      callsiteDesc: String
+  ) extends CannotInlineWarning
+  case class ResultingMethodTooLarge(
+      calleeDeclarationClass: InternalName,
+      name: String,
+      descriptor: String,
+      annotatedInline: Boolean,
+      callsiteClass: InternalName,
+      callsiteName: String,
+      callsiteDesc: String
+  ) extends CannotInlineWarning
 
   // TODO: this should be a subtype of CannotInlineWarning
   // but at the place where it's created (in findIllegalAccess) we don't have the necessary data (calleeName, calleeDescriptor).
   final case object UnknownInvokeDynamicInstruction extends OptimizerWarning {
-    override def toString = "The callee contains an InvokeDynamic instruction with an unknown bootstrap method (not a LambdaMetaFactory)."
+    override def toString =
+      "The callee contains an InvokeDynamic instruction with an unknown bootstrap method (not a LambdaMetaFactory)."
     def emitWarning(settings: CompilerSettings): Boolean = settings.optWarningEmitAnyInlineFailed
   }
 
-  /**
-   * Used in `rewriteClosureApplyInvocations` when a closure apply callsite cannot be rewritten
-   * to the closure body method.
-   */
+  /** Used in `rewriteClosureApplyInvocations` when a closure apply callsite cannot be rewritten to the closure body
+    * method.
+    */
   sealed trait RewriteClosureApplyToClosureBodyFailed extends OptimizerWarning {
     def pos: Position
 
@@ -256,12 +335,13 @@ object BackendReporting {
         s"The closure body invocation cannot be rewritten because the target method is not accessible in class $callsiteClass."
     }
   }
-  final case class RewriteClosureAccessCheckFailed(pos: Position, cause: OptimizerWarning) extends RewriteClosureApplyToClosureBodyFailed
-  final case class RewriteClosureIllegalAccess(pos: Position, callsiteClass: InternalName) extends RewriteClosureApplyToClosureBodyFailed
+  final case class RewriteClosureAccessCheckFailed(pos: Position, cause: OptimizerWarning)
+      extends RewriteClosureApplyToClosureBodyFailed
+  final case class RewriteClosureIllegalAccess(pos: Position, callsiteClass: InternalName)
+      extends RewriteClosureApplyToClosureBodyFailed
 
-  /**
-   * Used in the InlineInfo of a ClassBType, when some issue occurred obtaining the inline information.
-   */
+  /** Used in the InlineInfo of a ClassBType, when some issue occurred obtaining the inline information.
+    */
   sealed trait ClassInlineInfoWarning extends OptimizerWarning {
     override def toString = this match {
       case NoInlineInfoAttribute(internalName) =>
@@ -287,12 +367,13 @@ object BackendReporting {
 
   final case class NoInlineInfoAttribute(internalName: InternalName) extends ClassInlineInfoWarning
   final case class ClassSymbolInfoFailureSI9111(classFullName: String) extends ClassInlineInfoWarning
-  final case class ClassNotFoundWhenBuildingInlineInfoFromSymbol(missingClass: ClassNotFound) extends ClassInlineInfoWarning
-  final case class UnknownScalaInlineInfoVersion(internalName: InternalName, version: Int) extends ClassInlineInfoWarning
+  final case class ClassNotFoundWhenBuildingInlineInfoFromSymbol(missingClass: ClassNotFound)
+      extends ClassInlineInfoWarning
+  final case class UnknownScalaInlineInfoVersion(internalName: InternalName, version: Int)
+      extends ClassInlineInfoWarning
 
-  /**
-   * Reporter trait — replaces PostProcessorFrontendAccess.BackendReporting.
-   */
+  /** Reporter trait — replaces PostProcessorFrontendAccess.BackendReporting.
+    */
   trait Reporter {
     def siteString(owner: InternalName, method: String): String = {
       val c = owner.replace('/', '.').replaceAll("\\$+", ".").replaceAll("\\.$", "")

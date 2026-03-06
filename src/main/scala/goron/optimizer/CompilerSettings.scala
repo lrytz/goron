@@ -9,10 +9,9 @@ package goron.optimizer
 
 import goron.GoronConfig
 
-/**
- * Replacement for PostProcessorFrontendAccess.CompilerSettings.
- * Translates GoronConfig into the settings interface expected by the forked optimizer.
- */
+/** Replacement for PostProcessorFrontendAccess.CompilerSettings. Translates GoronConfig into the settings interface
+  * expected by the forked optimizer.
+  */
 trait CompilerSettings {
   def debug: Boolean
 

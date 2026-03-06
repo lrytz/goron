@@ -7,7 +7,17 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{BTypes, BTypesFromClassfile, CompilerSettings, CoreBTypes, LabelNode1, MethodNode1, ClassNode1, PerRunInit, PostProcessor}
+import goron.optimizer.{
+  BTypes,
+  BTypesFromClassfile,
+  CompilerSettings,
+  CoreBTypes,
+  LabelNode1,
+  MethodNode1,
+  ClassNode1,
+  PerRunInit,
+  PostProcessor
+}
 
 import scala.annotation.tailrec
 import scala.tools.asm.{Opcodes, Type}
@@ -30,21 +40,23 @@ abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opco
 
   def isRef(tp: Type): Boolean = tp != null && (tp.getSort match {
     case Type.OBJECT | Type.ARRAY => true
-    case _ => false
+    case _                        => false
   })
 
-  override def binaryOperation(insn: AbstractInsnNode, value1: BasicValue, value2: BasicValue): BasicValue = insn.getOpcode match {
-    case Opcodes.AALOAD => new AaloadValue(insn.asInstanceOf[InsnNode]) // see [[AaloadValue]]
-    case _ => super.binaryOperation(insn, value1, value2)
-  }
+  override def binaryOperation(insn: AbstractInsnNode, value1: BasicValue, value2: BasicValue): BasicValue =
+    insn.getOpcode match {
+      case Opcodes.AALOAD => new AaloadValue(insn.asInstanceOf[InsnNode]) // see [[AaloadValue]]
+      case _              => super.binaryOperation(insn, value1, value2)
+    }
 
   override def naryOperation(insn: AbstractInsnNode, values: java.util.List[_ <: BasicValue]): BasicValue = {
     val v = super.naryOperation(insn, values)
     insn.getOpcode match {
-      case Opcodes.INVOKEDYNAMIC => insn match {
-        case LambdaMetaFactoryCall(_, _, _, _, _) => new LMFValue(v.getType)
-        case _ => v
-      }
+      case Opcodes.INVOKEDYNAMIC =>
+        insn match {
+          case LambdaMetaFactoryCall(_, _, _, _, _) => new LMFValue(v.getType)
+          case _                                    => v
+        }
       case _ => v
     }
   }
@@ -54,7 +66,8 @@ abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opco
   @tailrec
   override final def merge(a: BasicValue, b: BasicValue): BasicValue = {
     if (a == b) a
-    else if (a.isInstanceOf[SpecialValue] || b.isInstanceOf[SpecialValue]) merge(new SpecialAwareBasicValue(a.getType), new SpecialAwareBasicValue(b.getType))
+    else if (a.isInstanceOf[SpecialValue] || b.isInstanceOf[SpecialValue])
+      merge(new SpecialAwareBasicValue(a.getType), new SpecialAwareBasicValue(b.getType))
     else if (isRef(a.getType) && isRef(b.getType)) refLub(a, b)
     else UninitializedValue
   }
@@ -70,20 +83,23 @@ object TypeFlowInterpreter {
   class SpecialAwareBasicValue(tpe: Type) extends BasicValue(tpe) {
     override def equals(other: Any): Boolean = {
       this match {
-        case tav: AaloadValue => other match {
-          case oav: AaloadValue => tav.aaload == oav.aaload
-          case _ => false
-        }
-        case _: LMFValue => other.isInstanceOf[LMFValue] && super.equals(other)
-        case pv: ParamValue => other.isInstanceOf[ParamValue] && pv.local == other.asInstanceOf[ParamValue].local && super.equals(other)
-        case _ => !other.isInstanceOf[SpecialValue] && super.equals(other) // A non-special value cannot equal a special value
+        case tav: AaloadValue =>
+          other match {
+            case oav: AaloadValue => tav.aaload == oav.aaload
+            case _                => false
+          }
+        case _: LMFValue    => other.isInstanceOf[LMFValue] && super.equals(other)
+        case pv: ParamValue =>
+          other.isInstanceOf[ParamValue] && pv.local == other.asInstanceOf[ParamValue].local && super.equals(other)
+        case _ =>
+          !other.isInstanceOf[SpecialValue] && super.equals(other) // A non-special value cannot equal a special value
       }
     }
 
     override def hashCode: Int = this match {
       case av: AaloadValue => av.aaload.hashCode
-      case pv: ParamValue => pv.local + super.hashCode
-      case _ => super.hashCode
+      case pv: ParamValue  => pv.local + super.hashCode
+      case _               => super.hashCode
     }
   }
 
@@ -108,16 +124,15 @@ object TypeFlowInterpreter {
   class ParamValue(val local: Int, tpe: Type) extends SpecialAwareBasicValue(tpe) with SpecialValue
 }
 
-/**
- * A [[TypeFlowInterpreter]] which collapses LUBs of non-equal reference types to Object.
- * This could be made more precise by looking up ClassBTypes for the two reference types and using
- * the `jvmWiseLUB` method.
- */
+/** A [[TypeFlowInterpreter]] which collapses LUBs of non-equal reference types to Object. This could be made more
+  * precise by looking up ClassBTypes for the two reference types and using the `jvmWiseLUB` method.
+  */
 class NonLubbingTypeFlowInterpreter extends TypeFlowInterpreter {
   def refLub(a: BasicValue, b: BasicValue): BasicValue = ObjectValue
 }
 
-class NonLubbingTypeFlowAnalyzer(methodNode: MethodNode, classInternalName: InternalName) extends AsmAnalyzer(methodNode, classInternalName, new Analyzer(new NonLubbingTypeFlowInterpreter)) {
+class NonLubbingTypeFlowAnalyzer(methodNode: MethodNode, classInternalName: InternalName)
+    extends AsmAnalyzer(methodNode, classInternalName, new Analyzer(new NonLubbingTypeFlowInterpreter)) {
   // see [[AaloadValue]]
   def preciseAaloadTypeDesc(value: BasicValue): String = value match {
     case aaloadValue: AaloadValue =>

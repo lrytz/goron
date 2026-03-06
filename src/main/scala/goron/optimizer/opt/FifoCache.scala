@@ -13,18 +13,18 @@ import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 
 object FifoCache {
-  def apply[K,V](maxSize: Int, threadsafe: Boolean): mutable.Map[K,V] = {
+  def apply[K, V](maxSize: Int, threadsafe: Boolean): mutable.Map[K, V] = {
     require(maxSize > 0)
     if (threadsafe) new ConcFifoCache(maxSize) else new FifoCache[K, V](maxSize).asScala
   }
 
-  private class FifoCache[K, V](maxSize: Int) extends LinkedHashMap[K,V] {
+  private class FifoCache[K, V](maxSize: Int) extends LinkedHashMap[K, V] {
     override def removeEldestEntry(eldest: JMap.Entry[K, V]): Boolean = {
       size() > maxSize
     }
   }
 
-  private class ConcFifoCache[K, V](maxSize: Int) extends mutable.Map[K,V] {
+  private class ConcFifoCache[K, V](maxSize: Int) extends mutable.Map[K, V] {
     private val cache: ConcurrentHashMap[K, V] = new ConcurrentHashMap()
     private val queue: ConcurrentLinkedQueue[K] = new ConcurrentLinkedQueue()
 
