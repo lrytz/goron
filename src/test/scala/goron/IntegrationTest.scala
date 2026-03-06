@@ -221,4 +221,24 @@ class IntegrationTest extends GoronTesting {
       s"OnlyUsedByUnused should be eliminated (only referenced from stripped method): $names")
     assertEquals(runMain(survivors), "42")
   }
+
+  test("runMain classloader blocks eliminated scala-library classes") {
+    val code =
+      """object Main {
+        |  def main(args: Array[String]): Unit = println("hello")
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    // Removing a needed scala-library class should cause a ClassNotFoundException,
+    // not silently fall back to the unoptimized version on the test classpath.
+    val broken = survivors.filterNot(_.name == "scala/Console$")
+    val e = intercept[java.lang.reflect.InvocationTargetException] {
+      runMain(broken)
+    }
+    // The cause chain is typically NoClassDefFoundError -> ClassNotFoundException
+    def hasCause(t: Throwable, cls: Class[_]): Boolean =
+      t != null && (cls.isInstance(t) || hasCause(t.getCause, cls))
+    assert(hasCause(e, classOf[ClassNotFoundException]),
+      s"Expected ClassNotFoundException in cause chain, got: ${e.getCause}")
+  }
 }
