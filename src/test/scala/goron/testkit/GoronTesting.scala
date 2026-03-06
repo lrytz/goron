@@ -277,22 +277,24 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
       cn.name.replace('/', '.') -> pp.serializeClass(cn)
     }.toMap
 
+    // Isolated classloader: classes in classBytes are loaded from the optimized
+    // bytecode. Scala-library classes NOT in classBytes are blocked (they were
+    // DCE'd and shouldn't be available). Only JDK and test infrastructure classes
+    // delegate to the parent.
+    val allSurvivorNames = classBytes.keySet
     val parentCl = getClass.getClassLoader
     val cl = new ClassLoader(parentCl) {
-      override def findClass(name: String): Class[_] = {
+      override def loadClass(name: String, resolve: Boolean): Class[_] = {
+        val already = findLoadedClass(name)
+        if (already != null) return already
         classBytes.get(name) match {
           case Some(bytes) => defineClass(name, bytes, 0, bytes.length)
-          case None => super.findClass(name)
-        }
-      }
-      // Prefer our classes over parent for user-defined classes
-      override def loadClass(name: String, resolve: Boolean): Class[_] = {
-        classBytes.get(name) match {
-          case Some(bytes) =>
-            val c = findLoadedClass(name)
-            if (c != null) c
-            else defineClass(name, bytes, 0, bytes.length)
-          case None => super.loadClass(name, resolve)
+          case None if name.startsWith("scala.") =>
+            // Scala-library class not in survivors — it was eliminated.
+            // Block it so we detect missing DCE dependencies.
+            throw new ClassNotFoundException(s"$name was eliminated by DCE and is not available")
+          case None =>
+            super.loadClass(name, resolve)
         }
       }
     }
