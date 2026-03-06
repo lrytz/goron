@@ -31,10 +31,11 @@ class IntegrationTest extends GoronTesting {
         |  def foo: Int = 42
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val names = survivingClassNames(survivors)
     assert(names.contains("Main$"), s"Main$$ should survive, got: $names")
     assert(!names.contains("Unused"), s"Unused should be eliminated, got: $names")
+    assertEquals(runMain(survivors), "hello")
   }
 
   test("class reachable through method reference is retained") {
@@ -49,10 +50,11 @@ class IntegrationTest extends GoronTesting {
         |  def compute: Int = 99
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val names = survivingClassNames(survivors)
     assert(names.contains("Main$"))
     assert(names.contains("Helper"))
+    assertEquals(runMain(survivors), "99")
   }
 
   test("unused subclass eliminated, used subclass retained") {
@@ -67,11 +69,12 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val names = survivingClassNames(survivors)
     assert(names.contains("Used"), s"Used should survive: $names")
     assert(names.contains("Base"), s"Base should survive: $names")
     assert(!names.contains("NotUsed"), s"NotUsed should be eliminated: $names")
+    assertEquals(runMain(survivors), "1")
   }
 
   test("scala-library classes mostly eliminated in simple app") {
@@ -80,13 +83,14 @@ class IntegrationTest extends GoronTesting {
         |  def main(args: Array[String]): Unit = println("hello")
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val names = survivingClassNames(survivors)
     val scalaLibCount = names.count(_.startsWith("scala/"))
     val totalLibClasses = goron.testkit.GoronTesting.scalaLibraryNodes.size
     // Method-level DCE: a println app should keep only a small fraction of scala-library
     assert(scalaLibCount < 200,
       s"Expected <200 scala-library classes for println app, but kept $scalaLibCount of $totalLibClasses")
+    assertEquals(runMain(survivors), "hello")
   }
 
   // --- Inlining tests ---
@@ -103,10 +107,11 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val mainClass = findClass(survivors, "Main$")
     val mainMethod = getMethod(mainClass, "main")
     assertDoesNotInvoke(mainMethod, "doubled")
+    assertEquals(runMain(survivors), "42")
   }
 
   test("closure optimization after inlining removes InvokeDynamic") {
@@ -119,10 +124,11 @@ class IntegrationTest extends GoronTesting {
         |  def main(args: Array[String]): Unit = println(new C().test)
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val c = findClass(survivors, "C")
     val testMethod = getMethod(c, "test")
     assertNoIndy(testMethod)
+    assertEquals(runMain(survivors), "6")
   }
 
   // --- Closed-world test ---
@@ -139,12 +145,13 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"), goronConfig.copy(closedWorld = true))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = true))
     val onlyImpl = findClass(survivors, "OnlyImpl")
     val computeMethod = getAsmMethod(onlyImpl, "compute")
     // In closed-world, OnlyImpl has no subclasses, so compute should be marked ACC_FINAL
     assert((computeMethod.access & Opcodes.ACC_FINAL) != 0,
       s"Expected compute to be marked ACC_FINAL in closed-world mode")
+    assertEquals(runMain(survivors), "42")
   }
 
   // --- Method-level DCE tests ---
@@ -162,12 +169,13 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val helper = findClass(survivors, "Helper")
     val methodNames = helper.methods.asScala.map(_.name).toSet
     assert(methodNames.contains("used"), s"used should survive: $methodNames")
     assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
     assert(methodNames.contains("<init>"), s"<init> should survive: $methodNames")
+    assertEquals(runMain(survivors), "42")
   }
 
   test("interface method implementation retained when called through interface") {
@@ -184,11 +192,12 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val hello = findClass(survivors, "Hello")
     val methodNames = hello.methods.asScala.map(_.name).toSet
     assert(methodNames.contains("greet"), s"greet should survive: $methodNames")
     assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
+    assertEquals(runMain(survivors), "hello")
   }
 
   test("class only referenced from stripped method is eliminated") {
@@ -205,10 +214,11 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
     val names = survivingClassNames(survivors)
     assert(names.contains("Helper"), s"Helper should survive: $names")
     assert(!names.contains("OnlyUsedByUnused"),
       s"OnlyUsedByUnused should be eliminated (only referenced from stripped method): $names")
+    assertEquals(runMain(survivors), "42")
   }
 }

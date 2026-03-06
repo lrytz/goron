@@ -263,6 +263,55 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
 
   def survivingClassNames(classes: List[ClassNode]): Set[String] =
     classes.map(_.name).toSet
+
+  /** Serialize surviving ClassNodes to bytes, invoke the static main method via a
+    * classloader, and return captured stdout.
+    */
+  def runMain(survivors: List[ClassNode], mainClass: String = "Main"): String = {
+    val pp = GoronTesting.createPostProcessor(goronConfig)
+    // Add all surviving classes so serializeClass can compute frames
+    for (cn <- survivors) pp.byteCodeRepository.add(cn, Some("goron-test"))
+
+    val classBytes = survivors.map { cn =>
+      pp.setInnerClasses(cn)
+      cn.name.replace('/', '.') -> pp.serializeClass(cn)
+    }.toMap
+
+    val parentCl = getClass.getClassLoader
+    val cl = new ClassLoader(parentCl) {
+      override def findClass(name: String): Class[_] = {
+        classBytes.get(name) match {
+          case Some(bytes) => defineClass(name, bytes, 0, bytes.length)
+          case None => super.findClass(name)
+        }
+      }
+      // Prefer our classes over parent for user-defined classes
+      override def loadClass(name: String, resolve: Boolean): Class[_] = {
+        classBytes.get(name) match {
+          case Some(bytes) =>
+            val c = findLoadedClass(name)
+            if (c != null) c
+            else defineClass(name, bytes, 0, bytes.length)
+          case None => super.loadClass(name, resolve)
+        }
+      }
+    }
+
+    val mainCls = cl.loadClass(mainClass)
+    val mainMethod = mainCls.getMethod("main", classOf[Array[String]])
+
+    val baos = new java.io.ByteArrayOutputStream()
+    val oldOut = System.out
+    val ps = new java.io.PrintStream(baos)
+    try {
+      System.setOut(ps)
+      mainMethod.invoke(null, Array.empty[String])
+    } finally {
+      System.setOut(oldOut)
+      ps.flush()
+    }
+    baos.toString.trim
+  }
 }
 
 object GoronTesting {
