@@ -320,6 +320,54 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     }
     baos.toString.trim
   }
+
+  /** Like runMain, but also records which classes are loaded into the provided set. */
+  def runMainTracking(survivors: List[ClassNode], mainClass: String = "Main",
+      loadedClasses: java.util.Set[String]): String = {
+    val pp = GoronTesting.createPostProcessor(goronConfig)
+    for (cn <- survivors) pp.byteCodeRepository.add(cn, Some("goron-test"))
+
+    val classBytes = survivors.map { cn =>
+      pp.setInnerClasses(cn)
+      cn.name.replace('/', '.') -> pp.serializeClass(cn)
+    }.toMap
+
+    val parentCl = getClass.getClassLoader
+    val cl = new ClassLoader(parentCl) {
+      override def loadClass(name: String, resolve: Boolean): Class[_] = {
+        val already = findLoadedClass(name)
+        if (already != null) return already
+        loadedClasses.add(name)
+        classBytes.get(name) match {
+          case Some(bytes) => defineClass(name, bytes, 0, bytes.length)
+          case None if name.startsWith("scala.") =>
+            throw new ClassNotFoundException(s"$name was eliminated by DCE and is not available")
+          case None =>
+            super.loadClass(name, resolve)
+        }
+      }
+    }
+
+    val mainCls = cl.loadClass(mainClass)
+    val (mainMethod, mainArgs) = try {
+      (mainCls.getMethod("main", classOf[Array[String]]), Array[AnyRef](Array.empty[String]))
+    } catch {
+      case _: NoSuchMethodException =>
+        (mainCls.getMethod("main"), Array.empty[AnyRef])
+    }
+
+    val baos = new java.io.ByteArrayOutputStream()
+    val oldOut = System.out
+    val ps = new java.io.PrintStream(baos)
+    try {
+      System.setOut(ps)
+      mainMethod.invoke(null, mainArgs: _*)
+    } finally {
+      System.setOut(oldOut)
+      ps.flush()
+    }
+    baos.toString.trim
+  }
 }
 
 object GoronTesting {

@@ -253,5 +253,7 @@ class IntegrationTest extends GoronTesting {
       """.stripMargin
     val survivors = compileAndRunFullPipeline(code, Set("T"))
     assertEquals(runMain(survivors, "T"), (1 to 10).mkString("\n"))
+
+    println(s"=== Range test: ${survivors.size} survivors ===")
   }
 }

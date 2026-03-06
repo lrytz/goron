@@ -197,19 +197,25 @@ object ReachabilityAnalysis {
     }
 
     val virtualCallTargets = mutable.Set.empty[(String, String, String)]
+    val instantiatedClasses = mutable.Set.empty[String]
+
+    def markInstantiated(className: String): Unit = {
+      if (instantiatedClasses.add(className)) {
+        enqueueClass(className)
+        // Retroactively resolve virtual calls for this newly instantiated class
+        for ((targetOwner, name, desc) <- virtualCallTargets)
+          if (isSubclassOf(className, targetOwner, classByName))
+            resolveAndEnqueueMethod(className, name, desc)
+      }
+    }
 
     def enqueueVirtualCall(owner: String, name: String, desc: String): Unit = {
       virtualCallTargets += ((owner, name, desc))
-      resolveAndEnqueueMethod(owner, name, desc)
-      enqueueOverridesInSubclasses(owner, name, desc)
-    }
-
-    def enqueueOverridesInSubclasses(owner: String, name: String, desc: String): Unit = {
-      for (sub <- subclasses.getOrElse(owner, mutable.Set.empty)) {
-        if (reachableClasses.contains(sub))
-          enqueueMethod(sub, name, desc)
-        enqueueOverridesInSubclasses(sub, name, desc)
-      }
+      enqueueClass(owner)
+      // Only resolve on instantiated subtypes (RTA)
+      for (inst <- instantiatedClasses)
+        if (isSubclassOf(inst, owner, classByName))
+          resolveAndEnqueueMethod(inst, name, desc)
     }
 
     // Collect method signatures inherited from external (non-analyzed) superclasses/interfaces.
@@ -264,10 +270,6 @@ object ReachabilityAnalysis {
 
           addAnnotationClassRefs(cn.visibleAnnotations, enqueueClass)
           addAnnotationClassRefs(cn.invisibleAnnotations, enqueueClass)
-
-          for ((targetOwner, name, desc) <- virtualCallTargets)
-            if (isSubclassOf(className, targetOwner, classByName))
-              enqueueMethod(className, name, desc)
         }
       }
 
@@ -275,7 +277,7 @@ object ReachabilityAnalysis {
         val (className, methodName, methodDesc) = methodWorklist.dequeue()
         for (cn <- classByName.get(className);
              mn <- cn.methods.asScala.find(m => m.name == methodName && m.desc == methodDesc))
-          processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall)
+          processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall, markInstantiated)
       }
     }
 
@@ -318,7 +320,11 @@ object ReachabilityAnalysis {
     allReachable.toSet
   }
 
-  /** Collect class references from a ClassNode, but only from reachable methods. */
+  /** Collect class references from a ClassNode needed for JVM loading.
+    * For execution-reachable classes, we only need supertypes to be present —
+    * field types, method descriptors, and instruction references are verified
+    * lazily by the JVM when actually accessed.
+    */
   private def collectAllClassRefs(
     cn: ClassNode,
     reachableMethods: Set[(String, String, String)],
@@ -333,34 +339,14 @@ object ReachabilityAnalysis {
       }
     }
 
+    // Only supertypes are eagerly verified by the JVM during class loading
     if (cn.superName != null) enqueue(cn.superName)
     if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
-
-    if (cn.fields != null)
-      cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueue))
-
-    if (cn.methods != null) {
-      cn.methods.asScala.foreach { mn =>
-        // Only scan reachable methods (or abstract/native/bridge which aren't stripped).
-        // Unreachable methods will be stripped, so their references don't matter.
-        val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
-        val isNative = (mn.access & Opcodes.ACC_NATIVE) != 0
-        val isBridge = (mn.access & Opcodes.ACC_BRIDGE) != 0
-        if (isAbstract || isNative || isBridge || reachableMethods.contains((cn.name, mn.name, mn.desc))) {
-          addMethodDescClassRefs(mn.desc, enqueue)
-          if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueue)
-          collectInstructionClassRefs(mn, enqueue)
-          if (mn.tryCatchBlocks != null)
-            mn.tryCatchBlocks.asScala.foreach(tcb => if (tcb.`type` != null) enqueue(tcb.`type`))
-        }
-      }
-    }
-
-    addAnnotationClassRefs(cn.visibleAnnotations, enqueue)
-    addAnnotationClassRefs(cn.invisibleAnnotations, enqueue)
   }
 
-  /** Collect class references that are needed for a class to be LOADABLE (not executable). */
+  /** Collect class references that are needed for a class to be LOADABLE (not executable).
+    * Only supertypes are eagerly required by the JVM.
+    */
   private def collectLoadDeps(
     cn: ClassNode,
     reachable: mutable.Set[String],
@@ -374,21 +360,8 @@ object ReachabilityAnalysis {
       }
     }
 
-    // Supertypes
     if (cn.superName != null) enqueue(cn.superName)
     if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
-
-    // Field types
-    if (cn.fields != null)
-      cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueue))
-
-    // Method descriptor types (parameter + return types for ALL methods)
-    if (cn.methods != null)
-      cn.methods.asScala.foreach(mn => addMethodDescClassRefs(mn.desc, enqueue))
-
-    // Annotations
-    addAnnotationClassRefs(cn.visibleAnnotations, enqueue)
-    addAnnotationClassRefs(cn.invisibleAnnotations, enqueue)
   }
 
   /** Collect class references from instruction nodes. */
@@ -459,6 +432,7 @@ object ReachabilityAnalysis {
     enqueueClass: String => Unit,
     resolveAndEnqueueMethod: (String, String, String) => Unit,
     enqueueVirtualCall: (String, String, String) => Unit,
+    markInstantiated: String => Unit,
   ): Unit = {
     addMethodDescClassRefs(mn.desc, enqueueClass)
     if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueueClass)
@@ -482,6 +456,8 @@ object ReachabilityAnalysis {
             addTypeDescClassRefs(fi.desc, enqueueClass)
           case ti: TypeInsnNode =>
             addInternalOrArrayClassRef(ti.desc, enqueueClass)
+            if (ti.getOpcode == Opcodes.NEW)
+              markInstantiated(ti.desc)
           case mri: MultiANewArrayInsnNode =>
             addTypeDescClassRefs(mri.desc, enqueueClass)
           case ldc: LdcInsnNode =>
