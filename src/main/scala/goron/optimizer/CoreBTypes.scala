@@ -1,13 +1,8 @@
 /*
- * Scala (https://www.scala-lang.org)
- *
+ * Goron, a link-time optimizer for Scala JVM bytecode
  * Copyright EPFL and Lightbend, Inc. dba Akka
- *
  * Licensed under Apache License 2.0
- * (http://www.apache.org/licenses/LICENSE-2.0).
- *
- * See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership.
+ * (http://www.apache.org/licenses/LICENSE-2.0)
  */
 
 package goron.optimizer
