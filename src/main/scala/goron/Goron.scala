@@ -91,12 +91,15 @@ object Goron {
 
     val outputClassNodes = if (config.eliminateDeadCode && config.entryPoints.nonEmpty) {
       // Run DCE again — inlining may have made more classes unreachable
-      val reachable = ReachabilityAnalysis.reachableClasses(reachableClassNodes, config.entryPoints.toSet)
+      val (reachable, execReachable, reachableMethods) =
+        ReachabilityAnalysis.reachableClassesAndMethods(reachableClassNodes, config.entryPoints.toSet)
+      val surviving = reachableClassNodes.filter(cn => reachable.contains(cn.name))
+      val strippedMethods = ReachabilityAnalysis.stripUnreachableMethods(surviving, reachableMethods, execReachable)
       if (config.verbose) {
-        val removed = reachableClassNodes.size - reachable.size
-        println(s"  Dead code elimination: keeping ${reachable.size} of ${reachableClassNodes.size} classes ($removed removed)")
+        val removedClasses = reachableClassNodes.size - surviving.size
+        println(s"  Dead code elimination: keeping ${surviving.size} of ${reachableClassNodes.size} classes ($removedClasses classes removed, $strippedMethods methods stripped)")
       }
-      reachableClassNodes.filter(cn => reachable.contains(cn.name))
+      surviving
     } else {
       reachableClassNodes
     }

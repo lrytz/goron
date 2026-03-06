@@ -249,10 +249,13 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     if (config.optLocalOptimizations)
       for (cn <- reachableNodes) pp.localOptimizations(cn)
 
-    // Second DCE pass
+    // Second DCE pass + method stripping
     if (config.eliminateDeadCode && entryPoints.nonEmpty) {
-      val reachable2 = ReachabilityAnalysis.reachableClasses(reachableNodes, entryPoints)
-      reachableNodes.filter(cn => reachable2.contains(cn.name))
+      val (reachable2, execReachable2, reachableMethods2) =
+        ReachabilityAnalysis.reachableClassesAndMethods(reachableNodes, entryPoints)
+      val surviving = reachableNodes.filter(cn => reachable2.contains(cn.name))
+      ReachabilityAnalysis.stripUnreachableMethods(surviving, reachableMethods2, execReachable2)
+      surviving
     } else {
       reachableNodes
     }

@@ -146,4 +146,48 @@ class IntegrationTest extends GoronTesting {
     assert((computeMethod.access & Opcodes.ACC_FINAL) != 0,
       s"Expected compute to be marked ACC_FINAL in closed-world mode")
   }
+
+  // --- Method-level DCE tests ---
+
+  test("unreachable method is stripped from retained class") {
+    val code =
+      """class Helper {
+        |  def used: Int = 42
+        |  def unused: Int = 99
+        |}
+        |object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val h = new Helper
+        |    println(h.used)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val helper = findClass(survivors, "Helper")
+    val methodNames = helper.methods.asScala.map(_.name).toSet
+    assert(methodNames.contains("used"), s"used should survive: $methodNames")
+    assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
+    assert(methodNames.contains("<init>"), s"<init> should survive: $methodNames")
+  }
+
+  test("interface method implementation retained when called through interface") {
+    val code =
+      """trait Greeter { def greet: String }
+        |class Hello extends Greeter {
+        |  def greet: String = "hello"
+        |  def unused: String = "nope"
+        |}
+        |object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val g: Greeter = new Hello
+        |    println(g.greet)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val hello = findClass(survivors, "Hello")
+    val methodNames = hello.methods.asScala.map(_.name).toSet
+    assert(methodNames.contains("greet"), s"greet should survive: $methodNames")
+    assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
+  }
 }

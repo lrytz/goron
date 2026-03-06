@@ -36,12 +36,52 @@ object ReachabilityAnalysis {
     entryPoints: Set[String]
   ): Set[String] = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
-
-    // Phase 1: method-level BFS to find execution-reachable classes
-    val execReachable = methodLevelBFS(classByName, entryPoints)
-
-    // Phase 2: load closure — ensure all classes referenced by retained classes are loadable
+    val (execReachable, _) = methodLevelBFS(classByName, entryPoints)
     loadClosure(execReachable, classByName)
+  }
+
+  /**
+   * Like `reachableClasses`, but also returns the set of reachable methods and
+   * the execution-reachable class set (before load closure).
+   *
+   * @return (allReachableClasses, execReachableClasses, reachableMethods)
+   */
+  def reachableClassesAndMethods(
+    classNodes: Iterable[ClassNode],
+    entryPoints: Set[String]
+  ): (Set[String], Set[String], Set[(String, String, String)]) = {
+    val classByName = classNodes.map(cn => cn.name -> cn).toMap
+    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
+    val allReachable = loadClosure(execReachable, classByName)
+    (allReachable, execReachable, reachableMethods)
+  }
+
+  /**
+   * Remove unreachable methods from ClassNodes in-place.
+   * Only strips from execution-reachable classes (not load-closure-only).
+   * Never strips abstract or native methods.
+   */
+  def stripUnreachableMethods(
+    classNodes: Iterable[ClassNode],
+    reachableMethods: Set[(String, String, String)],
+    execReachableClasses: Set[String],
+  ): Int = {
+    var stripped = 0
+    for (cn <- classNodes if execReachableClasses.contains(cn.name)) {
+      if (cn.methods != null) {
+        val iter = cn.methods.iterator()
+        while (iter.hasNext) {
+          val mn = iter.next()
+          val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
+          val isNative = (mn.access & Opcodes.ACC_NATIVE) != 0
+          if (!isAbstract && !isNative && !reachableMethods.contains((cn.name, mn.name, mn.desc))) {
+            iter.remove()
+            stripped += 1
+          }
+        }
+      }
+    }
+    stripped
   }
 
   // ---------------------------------------------------------------------------
@@ -51,7 +91,7 @@ object ReachabilityAnalysis {
   private def methodLevelBFS(
     classByName: Map[String, ClassNode],
     entryPoints: Set[String]
-  ): Set[String] = {
+  ): (Set[String], Set[(String, String, String)]) = {
     // Build subclass map for virtual dispatch resolution
     val subclasses = mutable.Map.empty[String, mutable.Set[String]]
     for ((_, cn) <- classByName) {
@@ -175,7 +215,7 @@ object ReachabilityAnalysis {
       }
     }
 
-    reachableClasses.toSet
+    (reachableClasses.toSet, reachableMethods.toSet)
   }
 
   // ---------------------------------------------------------------------------
