@@ -17,3 +17,4 @@
 - [ ] Set up sbt-header for license headers
 - [ ] Better handling of Java module system accessibility restrictions (currently `optInlineFrom` excludes JDK internal packages as a crude workaround; need proper module-aware visibility checks for Java dependencies)
 - [ ] Make closed-world analysis update InlineInfo so the inliner can exploit effectively-final methods on Scala classes (currently only sets ACC_FINAL, which the inliner ignores in favor of ScalaInlineInfo's effectivelyFinal)
+- [ ] Build a reachability graph during analysis to support "why is X retained?" queries (record edges: which method/class caused each method/class to be enqueued, track virtual call resolution chains)
