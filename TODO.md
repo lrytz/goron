@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Eliminate unused methods from retained classes (currently only whole-class DCE)
+- [x] Eliminate unused methods from retained classes (currently only whole-class DCE)
 - [ ] Improve CLI output: show progress and stats during optimization (classes parsed, reachable, inlined, eliminated, etc.)
 - [ ] Create an sbt plugin
 - [ ] Parallelize local optimizations and serialization (per-class, no shared mutable state)
