@@ -2,6 +2,7 @@ package goron
 
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
+import scala.tools.asm
 import scala.tools.asm.{Handle, Opcodes, Type}
 import scala.tools.asm.tree._
 
@@ -59,7 +60,9 @@ object ReachabilityAnalysis {
   /**
    * Remove unreachable methods from ClassNodes in-place.
    * Only strips from execution-reachable classes (not load-closure-only).
-   * Never strips abstract or native methods.
+   * Never strips abstract, native, or bridge methods, nor methods that
+   * override/implement methods from classes outside the analyzed set
+   * (e.g. JDK classes whose method bodies we can't trace).
    */
   def stripUnreachableMethods(
     classNodes: Iterable[ClassNode],
@@ -74,7 +77,8 @@ object ReachabilityAnalysis {
           val mn = iter.next()
           val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
           val isNative = (mn.access & Opcodes.ACC_NATIVE) != 0
-          if (!isAbstract && !isNative && !reachableMethods.contains((cn.name, mn.name, mn.desc))) {
+          val isBridge = (mn.access & Opcodes.ACC_BRIDGE) != 0
+          if (!isAbstract && !isNative && !isBridge && !reachableMethods.contains((cn.name, mn.name, mn.desc))) {
             iter.remove()
             stripped += 1
           }
@@ -83,6 +87,38 @@ object ReachabilityAnalysis {
     }
     stripped
   }
+
+  /** Collect method signatures from an external class and its supertypes. */
+  private def collectExternalClassMethods(internalName: String): Set[(String, String)] = {
+    collectExternalClassMethodsCached.getOrElseUpdate(internalName, {
+      try {
+        val stream = Thread.currentThread().getContextClassLoader
+          .getResourceAsStream(internalName + ".class")
+        if (stream == null) return Set.empty
+        val bytes = try stream.readAllBytes() finally stream.close()
+        val cr = new asm.ClassReader(bytes)
+        val methods = mutable.Set.empty[(String, String)]
+        val superNames = mutable.ListBuffer.empty[String]
+        cr.accept(new asm.ClassVisitor(Opcodes.ASM9) {
+          override def visit(version: Int, access: Int, name: String, signature: String,
+              superName: String, interfaces: Array[String]): Unit = {
+            if (superName != null) superNames += superName
+            if (interfaces != null) superNames ++= interfaces
+          }
+          override def visitMethod(access: Int, name: String, descriptor: String,
+              signature: String, exceptions: Array[String]): asm.MethodVisitor = {
+            methods += ((name, descriptor))
+            null
+          }
+        }, asm.ClassReader.SKIP_CODE | asm.ClassReader.SKIP_DEBUG | asm.ClassReader.SKIP_FRAMES)
+        methods.toSet ++ superNames.flatMap(collectExternalClassMethods)
+      } catch {
+        case _: Exception => Set.empty
+      }
+    })
+  }
+
+  private val collectExternalClassMethodsCached = mutable.Map.empty[String, Set[(String, String)]]
 
   // ---------------------------------------------------------------------------
   // Phase 1: Method-level BFS
@@ -176,6 +212,23 @@ object ReachabilityAnalysis {
       }
     }
 
+    // Collect method signatures inherited from external (non-analyzed) superclasses/interfaces.
+    // Methods overriding external methods must be treated as reachable since external code
+    // can call them (e.g. JDK calling abstract method implementations via virtual dispatch).
+    val externalMethodsCache = mutable.Map.empty[String, Set[(String, String)]]
+    def externalMethods(className: String): Set[(String, String)] = {
+      externalMethodsCache.getOrElseUpdate(className, {
+        classByName.get(className) match {
+          case Some(cn) =>
+            val fromSuper = if (cn.superName != null) externalMethods(cn.superName) else Set.empty[(String, String)]
+            val fromIfaces = if (cn.interfaces != null) cn.interfaces.asScala.flatMap(externalMethods).toSet else Set.empty[(String, String)]
+            fromSuper ++ fromIfaces
+          case None =>
+            collectExternalClassMethods(className)
+        }
+      })
+    }
+
     // Seed: all methods in entry point classes
     for (ep <- entryPoints; cn <- classByName.get(ep)) {
       enqueueClass(ep)
@@ -191,9 +244,20 @@ object ReachabilityAnalysis {
           if (cn.superName != null) enqueueClass(cn.superName)
           if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueueClass)
 
-          if (cn.methods != null)
+          if (cn.methods != null) {
             cn.methods.asScala.filter(_.name == "<clinit>")
               .foreach(mn => enqueueMethod(className, mn.name, mn.desc))
+
+            // Methods that override external (non-analyzed) class methods are implicitly
+            // reachable — external code can invoke them via virtual dispatch.
+            val inherited = externalMethods(className)
+            if (inherited.nonEmpty) {
+              cn.methods.asScala.foreach { mn =>
+                if (inherited.contains((mn.name, mn.desc)))
+                  enqueueMethod(className, mn.name, mn.desc)
+              }
+            }
+          }
 
           if (cn.fields != null)
             cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueueClass))
@@ -277,11 +341,12 @@ object ReachabilityAnalysis {
 
     if (cn.methods != null) {
       cn.methods.asScala.foreach { mn =>
-        // Only scan reachable methods (or abstract/native which aren't stripped).
+        // Only scan reachable methods (or abstract/native/bridge which aren't stripped).
         // Unreachable methods will be stripped, so their references don't matter.
         val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
         val isNative = (mn.access & Opcodes.ACC_NATIVE) != 0
-        if (isAbstract || isNative || reachableMethods.contains((cn.name, mn.name, mn.desc))) {
+        val isBridge = (mn.access & Opcodes.ACC_BRIDGE) != 0
+        if (isAbstract || isNative || isBridge || reachableMethods.contains((cn.name, mn.name, mn.desc))) {
           addMethodDescClassRefs(mn.desc, enqueue)
           if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueue)
           collectInstructionClassRefs(mn, enqueue)
