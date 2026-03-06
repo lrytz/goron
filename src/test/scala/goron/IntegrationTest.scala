@@ -241,4 +241,17 @@ class IntegrationTest extends GoronTesting {
     assert(hasCause(e, classOf[ClassNotFoundException]),
       s"Expected ClassNotFoundException in cause chain, got: ${e.getCause}")
   }
+
+  test("for-comprehension over Range prints correctly") {
+    val code =
+      """object T {
+        |  def main(): Unit = {
+        |    for (i <- 1 to 10)
+        |      println(i)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("T"))
+    assertEquals(runMain(survivors, "T"), (1 to 10).mkString("\n"))
+  }
 }

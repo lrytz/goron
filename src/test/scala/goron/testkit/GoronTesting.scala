@@ -300,14 +300,20 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     }
 
     val mainCls = cl.loadClass(mainClass)
-    val mainMethod = mainCls.getMethod("main", classOf[Array[String]])
+    // Static forwarders: main(String[]) or main() (no-arg)
+    val (mainMethod, mainArgs) = try {
+      (mainCls.getMethod("main", classOf[Array[String]]), Array[AnyRef](Array.empty[String]))
+    } catch {
+      case _: NoSuchMethodException =>
+        (mainCls.getMethod("main"), Array.empty[AnyRef])
+    }
 
     val baos = new java.io.ByteArrayOutputStream()
     val oldOut = System.out
     val ps = new java.io.PrintStream(baos)
     try {
       System.setOut(ps)
-      mainMethod.invoke(null, Array.empty[String])
+      mainMethod.invoke(null, mainArgs: _*)
     } finally {
       System.setOut(oldOut)
       ps.flush()
