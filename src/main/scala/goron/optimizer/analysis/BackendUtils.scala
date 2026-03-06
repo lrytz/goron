@@ -7,34 +7,21 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  MethodNode1,
-  ClassNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes._
+import goron.optimizer.analysis.BackendUtils._
+import goron.optimizer.opt.BytecodeUtils.{INSTANCE_CONSTRUCTOR_NAME, _}
+import goron.optimizer.{LabelNode1, PerRunInit, Position, PostProcessor}
 
 import java.util.concurrent.ConcurrentHashMap
-
 import scala.annotation.{switch, tailrec}
-import scala.collection.immutable.BitSet
 import scala.collection.immutable.ArraySeq.unsafeWrapArray
+import scala.collection.immutable.BitSet
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
-import goron.optimizer.Position
 import scala.tools.asm
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree._
 import scala.tools.asm.{Handle, Opcodes, Type}
-import goron.optimizer.BTypes._
-import goron.optimizer.opt.BytecodeUtils.{INSTANCE_CONSTRUCTOR_NAME, CLASS_CONSTRUCTOR_NAME}
-import goron.optimizer.analysis.BackendUtils._
-import goron.optimizer.opt.BytecodeUtils._
 import scala.util.control.{NoStackTrace, NonFatal}
 
 /** This component hosts tools and utilities used in the backend that require access to a `BTypes` instance.

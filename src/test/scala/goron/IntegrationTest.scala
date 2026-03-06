@@ -7,11 +7,10 @@
 
 package goron
 
+import goron.testkit.GoronTesting
+
 import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes
-
-import goron.testkit.ASMConverters._
-import goron.testkit.GoronTesting
 
 /** Integration tests that run the full goron pipeline over user classes + scala-library. These test whole-program
   * properties: DCE, inlining with real library classes, and closed-world optimizations.

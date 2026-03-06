@@ -7,23 +7,12 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  MethodNode1,
-  ClassNode1,
-  PerRunInit,
-  PostProcessor
-}
-
-import scala.tools.asm.tree.analysis._
-import scala.tools.asm.tree.{AbstractInsnNode, MethodNode}
 import goron.optimizer.BTypes.InternalName
 import goron.optimizer.analysis.BackendUtils.computeMaxLocalsMaxStack
 import goron.optimizer.opt.BytecodeUtils._
+
+import scala.tools.asm.tree.analysis._
+import scala.tools.asm.tree.{AbstractInsnNode, MethodNode}
 
 /** A wrapper to make ASM's Analyzer a bit easier to use.
   */

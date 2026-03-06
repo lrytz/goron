@@ -7,18 +7,19 @@
 
 package goron.optimizer.opt
 
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.BackendReporting._
+import goron.optimizer.Position.NoPosition
+import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
+import goron.optimizer.opt.BytecodeUtils._
+import goron.optimizer.{PerRunInit, PostProcessor}
+
 import scala.annotation.nowarn
 import scala.collection.{concurrent, mutable}
 import scala.jdk.CollectionConverters._
-import goron.optimizer.Position.NoPosition
 import scala.tools.asm
-import scala.tools.asm.{Attribute, Type}
 import scala.tools.asm.tree._
-import goron.optimizer.{BTypes, BTypesFromClassfile, PerRunInit, PostProcessor}
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.BackendReporting._
-import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
-import goron.optimizer.opt.BytecodeUtils._
+import scala.tools.asm.{Attribute, Type}
 
 /** The ByteCodeRepository provides utilities to read the bytecode of classfiles from the compilation classpath. Parsed
   * classes are cached in the `classes` map.

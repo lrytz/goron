@@ -7,10 +7,10 @@
 
 package goron
 
-import scala.tools.asm.Opcodes._
-
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
+
+import scala.tools.asm.Opcodes._
 
 /** Tests for cross-class inlining through goron's optimizer. Adapted from scala.tools.nsc.backend.jvm.opt.InlinerTest.
   *

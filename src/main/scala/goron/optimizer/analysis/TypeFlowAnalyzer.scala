@@ -7,26 +7,15 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  MethodNode1,
-  ClassNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
+import goron.optimizer.analysis.TypeFlowInterpreter._
+import goron.optimizer.opt.BytecodeUtils._
 
 import scala.annotation.tailrec
-import scala.tools.asm.{Opcodes, Type}
-import scala.tools.asm.tree.{AbstractInsnNode, InsnNode, MethodNode}
 import scala.tools.asm.tree.analysis.{Analyzer, BasicInterpreter, BasicValue}
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.analysis.TypeFlowInterpreter._
-import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
-import goron.optimizer.opt.BytecodeUtils._
+import scala.tools.asm.tree.{AbstractInsnNode, InsnNode, MethodNode}
+import scala.tools.asm.{Opcodes, Type}
 
 abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opcodes.ASM7) {
   override def newParameterValue(isInstanceMethod: Boolean, local: Int, tpe: Type): BasicValue =

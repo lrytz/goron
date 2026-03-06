@@ -7,14 +7,15 @@
 
 package goron.optimizer
 
+import goron.optimizer.BTypes.{InlineInfo, InternalName, MethodInlineInfo}
+import goron.optimizer.BackendReporting.{NoClassBTypeInfoMissingBytecode, NoInlineInfoAttribute}
+import goron.optimizer.opt.{BytecodeUtils, InlineInfoAttribute}
+
 import scala.annotation.{switch, unused}
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes
 import scala.tools.asm.tree.{ClassNode, InnerClassNode}
-import goron.optimizer.BTypes.{InlineInfo, InternalName, MethodInlineInfo}
-import goron.optimizer.BackendReporting.{NoClassBTypeInfoMissingBytecode, NoInlineInfoAttribute}
-import goron.optimizer.opt.{BytecodeUtils, InlineInfoAttribute}
 
 abstract class BTypesFromClassfile {
   val postProcessor: PostProcessor

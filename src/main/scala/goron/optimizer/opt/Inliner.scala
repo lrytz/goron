@@ -7,16 +7,13 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  BackendReporting,
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.AsmUtils._
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.BackendReporting._
+import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
+import goron.optimizer.analysis._
+import goron.optimizer.opt.BytecodeUtils._
+import goron.optimizer.{AsmUtils, BackendReporting, PostProcessor}
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -26,13 +23,6 @@ import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
 import scala.tools.asm.tree.analysis.Value
-import goron.optimizer.AsmUtils
-import goron.optimizer.AsmUtils._
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.BackendReporting._
-import goron.optimizer.analysis._
-import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
-import goron.optimizer.opt.BytecodeUtils._
 
 abstract class Inliner {
   val postProcessor: PostProcessor

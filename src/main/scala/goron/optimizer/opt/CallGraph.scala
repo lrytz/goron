@@ -7,30 +7,21 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.BackendReporting._
+import goron.optimizer.Position.NoPosition
+import goron.optimizer.{Position, PostProcessor}
+import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
+import goron.optimizer.analysis.TypeFlowInterpreter.{LMFValue, ParamValue}
+import goron.optimizer.analysis._
+import goron.optimizer.opt.BytecodeUtils._
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.IntMap
 import scala.collection.{concurrent, mutable}
 import scala.jdk.CollectionConverters._
-import goron.optimizer.Position
-import goron.optimizer.Position.NoPosition
 import scala.tools.asm.tree._
 import scala.tools.asm.{Opcodes, Type}
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.BackendReporting._
-import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
-import goron.optimizer.analysis.TypeFlowInterpreter.{LMFValue, ParamValue}
-import goron.optimizer.analysis._
-import goron.optimizer.opt.BytecodeUtils._
 
 abstract class CallGraph {
   val postProcessor: PostProcessor

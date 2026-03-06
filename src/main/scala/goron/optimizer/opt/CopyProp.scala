@@ -7,16 +7,11 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  AsmUtils,
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.analysis.BackendUtils._
+import goron.optimizer.analysis._
+import goron.optimizer.opt.BytecodeUtils._
+import goron.optimizer.{AsmUtils, PostProcessor}
 
 import scala.annotation.{switch, tailrec}
 import scala.collection.mutable
@@ -24,16 +19,12 @@ import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.analysis.BackendUtils.{LambdaMetaFactoryCall, _}
-import goron.optimizer.analysis._
-import goron.optimizer.opt.BytecodeUtils._
 
 abstract class CopyProp {
   val postProcessor: PostProcessor
 
-  import postProcessor.{backendUtils, callGraph, bTypes}
   import postProcessor.bTypes.compilerSettings
+  import postProcessor.{bTypes, backendUtils, callGraph}
   import backendUtils._
 
   /** For every `xLOAD n`, find all local variable slots that are aliases of `n` using an AliasingAnalyzer and change

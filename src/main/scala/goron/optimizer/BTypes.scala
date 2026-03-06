@@ -7,16 +7,16 @@
 
 package goron.optimizer
 
-import java.{util => ju}
-import java.lang.{StringBuilder, ThreadLocal}
-
-import scala.annotation.tailrec
-import scala.collection.SortedMap
-import scala.collection.immutable.ArraySeq.unsafeWrapArray
-import scala.tools.asm, asm.Opcodes
 import goron.optimizer.BTypes.{InlineInfo, InternalName}
 import goron.optimizer.BackendReporting._
 import goron.optimizer.opt._
+
+import java.{util => ju}
+import scala.annotation.tailrec
+import scala.collection.SortedMap
+import scala.collection.immutable.ArraySeq.unsafeWrapArray
+import scala.tools.asm
+import scala.tools.asm.Opcodes
 
 /** The BTypes component defines The BType class hierarchy. A BType stores all type information that is required after
   * building the ASM nodes. This includes optimizations, generation of InnerClass attributes and generation of stack map

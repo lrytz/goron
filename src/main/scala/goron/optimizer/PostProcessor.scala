@@ -7,11 +7,12 @@
 
 package goron.optimizer
 
-import scala.collection.mutable
-import scala.tools.asm.{ClassWriter, Opcodes}
-import scala.tools.asm.tree.ClassNode
 import goron.optimizer.analysis.BackendUtils
 import goron.optimizer.opt._
+
+import scala.collection.mutable
+import scala.tools.asm.ClassWriter
+import scala.tools.asm.tree.ClassNode
 
 /** Implements late stages of the backend that don't depend on a Global instance, i.e., optimizations, post-processing
   * and classfile serialization and writing.

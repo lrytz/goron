@@ -7,20 +7,12 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes
+import goron.optimizer.BTypes.{InlineInfo, MethodInlineInfo}
+import goron.optimizer.BackendReporting.UnknownScalaInlineInfoVersion
 
 import scala.collection.mutable
 import scala.tools.asm._
-import goron.optimizer.BTypes.{InlineInfo, MethodInlineInfo}
-import goron.optimizer.BackendReporting.UnknownScalaInlineInfoVersion
 
 /** This attribute stores the InlineInfo for a ClassBType as an independent classfile attribute. The compiler does so
   * for every class being compiled.

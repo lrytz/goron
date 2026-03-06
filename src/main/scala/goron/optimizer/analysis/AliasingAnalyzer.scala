@@ -7,27 +7,15 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  MethodNode1,
-  ClassNode1,
-  PerRunInit,
-  PostProcessor
-}
-
-import scala.annotation.switch
-import scala.collection.AbstractIterator
-import scala.collection.mutable
-import scala.tools.asm.Opcodes
-import scala.tools.asm.tree._
-import scala.tools.asm.tree.analysis._
 import goron.optimizer.BTypes.InternalName
 import goron.optimizer.analysis.AliasSet.SmallBitSet
 import goron.optimizer.opt.BytecodeUtils._
+
+import scala.annotation.switch
+import scala.collection.{AbstractIterator, mutable}
+import scala.tools.asm.Opcodes
+import scala.tools.asm.tree._
+import scala.tools.asm.tree.analysis._
 
 /** A subclass of Frame that tracks aliasing of values stored in local variables and on the stack.
   *

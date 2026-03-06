@@ -7,15 +7,8 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.analysis.InstructionStackEffect
+import goron.optimizer.{BTypes, LabelNode1}
 
 import scala.annotation.{switch, tailrec}
 import scala.collection.mutable
@@ -25,7 +18,6 @@ import scala.tools.asm.commons.CodeSizeEvaluator
 import scala.tools.asm.tree._
 import scala.tools.asm.tree.analysis._
 import scala.tools.asm.{Label, Type}
-import goron.optimizer.analysis.InstructionStackEffect
 
 object BytecodeUtils {
 

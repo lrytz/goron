@@ -7,27 +7,15 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  MethodNode1,
-  ClassNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.analysis.BackendUtils._
+import goron.optimizer.opt.BytecodeUtils._
 
 import java.util
-
 import scala.annotation.switch
-import scala.tools.asm.tree.analysis._
 import scala.tools.asm.tree._
+import scala.tools.asm.tree.analysis._
 import scala.tools.asm.{Opcodes, Type}
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.opt.BytecodeUtils._
-import goron.optimizer.analysis.BackendUtils._
 
 /** See the package object `analysis` for details on the ASM analysis framework.
   *

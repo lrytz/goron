@@ -7,8 +7,9 @@
 
 package goron.optimizer
 
-import scala.tools.asm.{Handle, Opcodes}
 import goron.optimizer.BTypes.InternalName
+
+import scala.tools.asm.{Handle, Opcodes}
 
 abstract class CoreBTypes extends PerRunInit {
   val bTypes: BTypes

@@ -7,24 +7,13 @@
 
 package goron.optimizer.analysis
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  MethodNode1,
-  ClassNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.opt.BytecodeUtils._
 
 import scala.annotation.switch
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
 import scala.tools.asm.tree.analysis.{Frame, Value}
-import goron.optimizer.opt.BytecodeUtils._
 
 object InstructionStackEffect {
   val consShift = 3

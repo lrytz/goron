@@ -7,14 +7,14 @@
 
 package goron.optimizer
 
-import java.io.{PrintWriter, StringWriter}
+import goron.optimizer.analysis.InitialProducer
+import goron.optimizer.opt.InlineInfoAttributePrototype
 
+import java.io.{PrintWriter, StringWriter}
 import scala.jdk.CollectionConverters._
 import scala.tools.asm.tree._
 import scala.tools.asm.util._
 import scala.tools.asm.{Attribute, ClassReader, ClassWriter}
-import goron.optimizer.analysis.InitialProducer
-import goron.optimizer.opt.InlineInfoAttributePrototype
 
 object AsmUtils {
 

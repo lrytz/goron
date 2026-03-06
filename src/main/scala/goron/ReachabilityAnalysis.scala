@@ -10,8 +10,8 @@ package goron
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.tools.asm
-import scala.tools.asm.{Handle, Opcodes, Type}
 import scala.tools.asm.tree._
+import scala.tools.asm.{Handle, Opcodes, Type}
 
 /** Whole-program reachability analysis in two phases:
   *

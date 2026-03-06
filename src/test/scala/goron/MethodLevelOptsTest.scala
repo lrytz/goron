@@ -7,10 +7,10 @@
 
 package goron
 
-import scala.tools.asm.Opcodes._
-
 import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
+
+import scala.tools.asm.Opcodes._
 
 /** Tests for method-level optimizations (dead stores, nullness, box/unbox, jump simplification). Adapted from
   * scala.tools.nsc.backend.jvm.opt.MethodLevelOptsTest.

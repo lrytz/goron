@@ -7,16 +7,10 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  AsmUtils,
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.analysis._
+import goron.optimizer.opt.BytecodeUtils._
+import goron.optimizer.{AsmUtils, PostProcessor}
 
 import scala.annotation.{switch, tailrec}
 import scala.collection.mutable
@@ -25,9 +19,6 @@ import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
 import scala.tools.asm.tree.analysis.Frame
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.analysis._
-import goron.optimizer.opt.BytecodeUtils._
 
 /** Optimizations within a single method. Certain optimizations enable others, for example removing unreachable code can
   * render a `try` block empty and enable removeEmptyExceptionHandlers. The latter in turn enables more unreachable code

@@ -7,27 +7,18 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.BackendReporting.{CalleeNotFinal, OptimizerWarning}
+import goron.optimizer.analysis.BackendUtils
+import goron.optimizer.opt.InlinerHeuristics._
+import goron.optimizer.{PerRunInit, PostProcessor}
 
 import java.util.regex.Pattern
-
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.tools.asm.Type
 import scala.tools.asm.tree.MethodNode
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.BackendReporting.{CalleeNotFinal, OptimizerWarning}
-import goron.optimizer.analysis.BackendUtils
-import goron.optimizer.opt.InlinerHeuristics._
 
 abstract class InlinerHeuristics extends PerRunInit {
   val postProcessor: PostProcessor

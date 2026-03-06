@@ -7,8 +7,9 @@
 
 package goron.optimizer
 
-import scala.tools.asm.tree.{AbstractInsnNode, MethodNode}
 import goron.optimizer.BTypes.InternalName
+
+import scala.tools.asm.tree.{AbstractInsnNode, MethodNode}
 import scala.util.control.ControlThrowable
 
 /** Utilities for error reporting.

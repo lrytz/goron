@@ -8,7 +8,9 @@
 package goron.testkit
 
 import scala.jdk.CollectionConverters._
-import scala.tools.asm, asm.{tree => t}, asm.Opcodes._
+import scala.tools.asm
+import scala.tools.asm.Opcodes._
+import scala.tools.asm.{tree => t}
 
 /** Wraps ASM instructions in case classes so that equals and toString work for the purpose of bytecode diffing and
   * pretty printing. Adapted from scala.tools.testkit.ASMConverters.

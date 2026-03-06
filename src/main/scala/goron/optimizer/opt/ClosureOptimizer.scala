@@ -7,33 +7,25 @@
 
 package goron.optimizer.opt
 
-import goron.optimizer.{
-  BTypes,
-  BTypesFromClassfile,
-  CompilerSettings,
-  CoreBTypes,
-  LabelNode1,
-  PerRunInit,
-  PostProcessor
-}
+import goron.optimizer.BTypes.InternalName
+import goron.optimizer.BackendReporting._
+import goron.optimizer.Position.NoPosition
+import goron.optimizer.PostProcessor
+import goron.optimizer.analysis.{AsmAnalyzer, BackendUtils, ProdConsAnalyzer}
+import goron.optimizer.opt.BytecodeUtils._
 
 import scala.annotation.switch
 import scala.collection.immutable.IntMap
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
-import goron.optimizer.Position.NoPosition
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
-import goron.optimizer.BTypes.InternalName
-import goron.optimizer.BackendReporting._
-import goron.optimizer.analysis.{AsmAnalyzer, BackendUtils, ProdConsAnalyzer}
-import goron.optimizer.opt.BytecodeUtils._
 
 abstract class ClosureOptimizer {
   val postProcessor: PostProcessor
 
-  import postProcessor.{bTypes, bTypesFromClassfile, callGraph, byteCodeRepository, localOpt, inliner, backendUtils}
+  import postProcessor.{bTypes, _}
   import bTypes._
   import bTypesFromClassfile._
   import backendUtils._
