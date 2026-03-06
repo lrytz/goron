@@ -36,8 +36,8 @@ object ReachabilityAnalysis {
     entryPoints: Set[String]
   ): Set[String] = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
-    val (execReachable, _) = methodLevelBFS(classByName, entryPoints)
-    loadClosure(execReachable, classByName)
+    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
+    loadClosure(execReachable, reachableMethods, classByName)
   }
 
   /**
@@ -52,7 +52,7 @@ object ReachabilityAnalysis {
   ): (Set[String], Set[String], Set[(String, String, String)]) = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
     val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
-    val allReachable = loadClosure(execReachable, classByName)
+    val allReachable = loadClosure(execReachable, reachableMethods, classByName)
     (allReachable, execReachable, reachableMethods)
   }
 
@@ -228,15 +228,20 @@ object ReachabilityAnalysis {
    * For load-reachable classes, we follow their type hierarchy and descriptor types
    * but NOT their method bodies.
    */
-  private def loadClosure(execReachable: Set[String], classByName: Map[String, ClassNode]): Set[String] = {
+  private def loadClosure(
+    execReachable: Set[String],
+    reachableMethods: Set[(String, String, String)],
+    classByName: Map[String, ClassNode],
+  ): Set[String] = {
     val allReachable = mutable.Set.empty[String]
     allReachable ++= execReachable
 
     val worklist = mutable.Queue.empty[String]
 
-    // Seed: collect all class references from execution-reachable classes
+    // Seed: collect class references from execution-reachable classes,
+    // but only scan methods that are reachable (unreachable methods will be stripped)
     for (name <- execReachable; cn <- classByName.get(name))
-      collectAllClassRefs(cn, allReachable, worklist, classByName)
+      collectAllClassRefs(cn, reachableMethods, allReachable, worklist, classByName)
 
     // Transitively close: load-reachable classes need their supertypes,
     // field types, and method descriptor types to also be loadable
@@ -249,9 +254,10 @@ object ReachabilityAnalysis {
     allReachable.toSet
   }
 
-  /** Collect ALL class references from a ClassNode (method bodies included). */
+  /** Collect class references from a ClassNode, but only from reachable methods. */
   private def collectAllClassRefs(
     cn: ClassNode,
+    reachableMethods: Set[(String, String, String)],
     reachable: mutable.Set[String],
     worklist: mutable.Queue[String],
     classByName: Map[String, ClassNode],
@@ -271,11 +277,17 @@ object ReachabilityAnalysis {
 
     if (cn.methods != null) {
       cn.methods.asScala.foreach { mn =>
-        addMethodDescClassRefs(mn.desc, enqueue)
-        if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueue)
-        collectInstructionClassRefs(mn, enqueue)
-        if (mn.tryCatchBlocks != null)
-          mn.tryCatchBlocks.asScala.foreach(tcb => if (tcb.`type` != null) enqueue(tcb.`type`))
+        // Only scan reachable methods (or abstract/native which aren't stripped).
+        // Unreachable methods will be stripped, so their references don't matter.
+        val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
+        val isNative = (mn.access & Opcodes.ACC_NATIVE) != 0
+        if (isAbstract || isNative || reachableMethods.contains((cn.name, mn.name, mn.desc))) {
+          addMethodDescClassRefs(mn.desc, enqueue)
+          if (mn.exceptions != null) mn.exceptions.asScala.foreach(enqueue)
+          collectInstructionClassRefs(mn, enqueue)
+          if (mn.tryCatchBlocks != null)
+            mn.tryCatchBlocks.asScala.foreach(tcb => if (tcb.`type` != null) enqueue(tcb.`type`))
+        }
       }
     }
 

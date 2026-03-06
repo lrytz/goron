@@ -190,4 +190,25 @@ class IntegrationTest extends GoronTesting {
     assert(methodNames.contains("greet"), s"greet should survive: $methodNames")
     assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
   }
+
+  test("class only referenced from stripped method is eliminated") {
+    val code =
+      """class OnlyUsedByUnused { def value: Int = 123 }
+        |class Helper {
+        |  def used: Int = 42
+        |  def unused: Int = new OnlyUsedByUnused().value
+        |}
+        |object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val h = new Helper
+        |    println(h.used)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main$"))
+    val names = survivingClassNames(survivors)
+    assert(names.contains("Helper"), s"Helper should survive: $names")
+    assert(!names.contains("OnlyUsedByUnused"),
+      s"OnlyUsedByUnused should be eliminated (only referenced from stripped method): $names")
+  }
 }
