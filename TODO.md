@@ -1,7 +1,7 @@
 # TODO
 
 - [x] Eliminate unused methods from retained classes (currently only whole-class DCE)
-- [ ] Improve CLI output: show progress and stats during optimization (classes parsed, reachable, inlined, eliminated, etc.)
+- [x] Improve CLI output: show progress and stats during optimization (classes parsed, reachable, inlined, eliminated, etc.)
 - [ ] Create an sbt plugin
 - [ ] Parallelize local optimizations and serialization (per-class, no shared mutable state)
 - [ ] Remove path-dependent types / cake pattern from optimizer fork (move ClassBType, Callsite, etc. to top-level types; replace abstract vals + singleton type refinements with constructor parameters)
