@@ -18,3 +18,9 @@
 - [ ] Better handling of Java module system accessibility restrictions (currently `optInlineFrom` excludes JDK internal packages as a crude workaround; need proper module-aware visibility checks for Java dependencies)
 - [ ] Make closed-world analysis update InlineInfo so the inliner can exploit effectively-final methods on Scala classes (currently only sets ACC_FINAL, which the inliner ignores in favor of ScalaInlineInfo's effectivelyFinal)
 - [ ] Build a reachability graph during analysis to support "why is X retained?" queries (record edges: which method/class caused each method/class to be enqueued, track virtual call resolution chains)
+- [ ] Improve reachability analysis performance (219s on scala-compiler):
+  - `isSubclassOf` is called O(virtualCallTargets × instantiatedClasses) times with no caching — precompute transitive subclass sets or use union-find
+  - `enqueueVirtualCall` iterates all instantiated classes for each new virtual call; `markInstantiated` iterates all virtual call targets for each new class — index by supertype for O(1) lookup
+  - `resolveAndEnqueueMethod` / `resolveMethodUp` does linear scan of `cn.methods` (Java List) — build a `(name, desc) → MethodNode` map per class
+  - `externalMethods` / `collectExternalClassMethods` reads JDK classfiles from disk — cache results across calls (already partially cached, verify)
+- [ ] Improve DCE performance (270s on scala-compiler): DCE runs a second full `reachableClassesAndMethods` BFS after inlining — same bottlenecks as above apply; additionally, consider incremental approach that only re-analyzes methods changed by inlining

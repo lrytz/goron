@@ -40,10 +40,11 @@ object ReachabilityAnalysis {
     */
   def reachableClasses(
       classNodes: Iterable[ClassNode],
-      entryPoints: Set[String]
+      entryPoints: Set[String],
+      progressCallback: String => Unit = _ => ()
   ): Set[String] = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
-    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
+    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints, progressCallback)
     loadClosure(execReachable, reachableMethods, classByName)
   }
 
@@ -55,10 +56,11 @@ object ReachabilityAnalysis {
     */
   def reachableClassesAndMethods(
       classNodes: Iterable[ClassNode],
-      entryPoints: Set[String]
+      entryPoints: Set[String],
+      progressCallback: String => Unit = _ => ()
   ): (Set[String], Set[String], Set[(String, String, String)]) = {
     val classByName = classNodes.map(cn => cn.name -> cn).toMap
-    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints)
+    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints, progressCallback)
     val allReachable = loadClosure(execReachable, reachableMethods, classByName)
     (allReachable, execReachable, reachableMethods)
   }
@@ -149,7 +151,8 @@ object ReachabilityAnalysis {
 
   private def methodLevelBFS(
       classByName: Map[String, ClassNode],
-      entryPoints: Set[String]
+      entryPoints: Set[String],
+      progressCallback: String => Unit
   ): (Set[String], Set[(String, String, String)]) = {
     // Build subclass map for virtual dispatch resolution
     val subclasses = mutable.Map.empty[String, mutable.Set[String]]
@@ -268,6 +271,24 @@ object ReachabilityAnalysis {
         cn.methods.asScala.foreach(mn => enqueueMethod(ep, mn.name, mn.desc))
     }
 
+    // Progress reporting
+    var lastProgressTime = System.nanoTime()
+    val progressIntervalNs = 5L * 1000000000L // 5 seconds
+    var methodsProcessed = 0
+
+    def reportProgress(): Unit = {
+      val now = System.nanoTime()
+      if (now - lastProgressTime >= progressIntervalNs) {
+        progressCallback(
+          s"  ${reachableClasses.size} classes, ${reachableMethods.size} methods reachable" +
+            s", ${methodsProcessed} methods scanned" +
+            s", ${virtualCallTargets.size} virtual call sites" +
+            s", ${instantiatedClasses.size} instantiated types"
+        )
+        lastProgressTime = now
+      }
+    }
+
     // Main BFS loop
     while (classWorklist.nonEmpty || methodWorklist.nonEmpty) {
       while (classWorklist.nonEmpty) {
@@ -307,6 +328,8 @@ object ReachabilityAnalysis {
           mn <- cn.methods.asScala.find(m => m.name == methodName && m.desc == methodDesc)
         )
           processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall, markInstantiated)
+        methodsProcessed += 1
+        reportProgress()
       }
     }
 
