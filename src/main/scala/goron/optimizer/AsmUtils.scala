@@ -30,8 +30,8 @@ object AsmUtils {
   final val traceClassPattern = ""
 
   /** Print the bytecode of classes as they are serialized by the ASM library. The serialization performed by
-    * `asm.ClassWriter` can change the bytecode. For example, it introduces stack map frames, it
-    * computes the maximal stack sizes, and it replaces dead code by NOPs (see also
+    * `asm.ClassWriter` can change the bytecode. For example, it introduces stack map frames, it computes the maximal
+    * stack sizes, and it replaces dead code by NOPs (see also
     * https://github.com/scala/scala/pull/3726#issuecomment-42861780).
     */
   final val traceSerializedClassEnabled = false

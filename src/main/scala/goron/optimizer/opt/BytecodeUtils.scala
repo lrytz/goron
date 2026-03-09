@@ -436,9 +436,9 @@ object BytecodeUtils {
       methodNode: MethodNode,
       bTypes: BTypes
   ): Unit = {
-    if (loadedType == bTypes.coreBTypes.srNothingRef.toASMType) {
+    if (loadedType == bTypes.CoreBTypes.srNothingRef.toASMType) {
       methodNode.instructions.insert(loadInstr, new InsnNode(ATHROW))
-    } else if (loadedType == bTypes.coreBTypes.srNullRef.toASMType) {
+    } else if (loadedType == bTypes.CoreBTypes.srNullRef.toASMType) {
       methodNode.instructions.insert(loadInstr, new InsnNode(ACONST_NULL))
       methodNode.instructions.insert(loadInstr, new InsnNode(POP))
     }

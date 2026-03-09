@@ -10,9 +10,9 @@ package goron.optimizer.opt
 import goron.optimizer.BTypes.InternalName
 import goron.optimizer.BackendReporting._
 import goron.optimizer.Position.NoPosition
+import goron.optimizer.PostProcessor
 import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
 import goron.optimizer.opt.BytecodeUtils._
-import goron.optimizer.PostProcessor
 
 import scala.annotation.nowarn
 import scala.collection.{concurrent, mutable}
@@ -97,10 +97,10 @@ abstract class ByteCodeRepository {
     def findSignaturePolymorphic(owner: ClassNode): Option[MethodNode] = {
       def hasObjectArrayParam(m: MethodNode) = Type.getArgumentTypes(m.desc) match {
         case Array(pt) =>
-          pt.getDimensions == 1 && pt.getElementType.getInternalName == coreBTypes.ObjectRef.internalName
+          pt.getDimensions == 1 && pt.getElementType.getInternalName == CoreBTypes.ObjectRef.internalName
         case _ => false
       }
-      if (owner.name == coreBTypes.jliMethodHandleRef.internalName || owner.name == "java/lang/invoke/VarHandle")
+      if (owner.name == CoreBTypes.jliMethodHandleRef.internalName || owner.name == "java/lang/invoke/VarHandle")
         owner.methods.asScala.find(m =>
           m.name == name &&
             isNativeMethod(m) &&

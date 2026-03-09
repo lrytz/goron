@@ -10,11 +10,11 @@ package goron.optimizer.opt
 import goron.optimizer.BTypes.InternalName
 import goron.optimizer.BackendReporting._
 import goron.optimizer.Position.NoPosition
-import goron.optimizer.{Position, PostProcessor}
 import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
 import goron.optimizer.analysis.TypeFlowInterpreter.{LMFValue, ParamValue}
 import goron.optimizer.analysis._
 import goron.optimizer.opt.BytecodeUtils._
+import goron.optimizer.{Position, PostProcessor}
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.IntMap

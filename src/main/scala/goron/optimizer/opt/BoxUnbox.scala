@@ -653,7 +653,7 @@ abstract class BoxUnbox {
       def transitiveSupertypes(clsbt: ClassBType): Set[ClassBType] =
         (clsbt.info.get.superClass ++ clsbt.info.get.interfaces).flatMap(transitiveSupertypes).toSet + clsbt
 
-      coreBTypes.boxedClasses.map { bc =>
+      CoreBTypes.boxedClasses.map { bc =>
         bc.internalName -> (transitiveSupertypes(bc).map(_.internalName) + bc.internalName)
       }.toMap
     }
@@ -733,7 +733,7 @@ abstract class BoxUnbox {
 
     private val refSupertypes = {
       import postProcessor.bTypes._
-      Set(coreBTypes.jiSerializableRef, coreBTypes.ObjectRef).map(_.internalName)
+      Set(CoreBTypes.jiSerializableRef, CoreBTypes.ObjectRef).map(_.internalName)
     }
 
     def checkRefCreation(

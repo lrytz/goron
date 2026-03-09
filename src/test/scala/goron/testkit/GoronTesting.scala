@@ -7,19 +7,18 @@
 
 package goron.testkit
 
-import scala.collection.mutable.ListBuffer
-import scala.jdk.CollectionConverters._
-import scala.reflect.io.VirtualDirectory
-import scala.tools.asm
-import scala.tools.asm.Opcodes
-import scala.tools.asm.tree.{ClassNode, MethodNode}
-import scala.tools.nsc.{Global, Settings}
-import scala.tools.nsc.reporters.StoreReporter
-
 import goron._
 import goron.optimizer._
 import goron.optimizer.opt.InlineInfoAttributePrototype
 import goron.testkit.ASMConverters._
+
+import scala.collection.mutable.ListBuffer
+import scala.jdk.CollectionConverters._
+import scala.reflect.io.VirtualDirectory
+import scala.tools.asm
+import scala.tools.asm.tree.{ClassNode, MethodNode}
+import scala.tools.nsc.reporters.StoreReporter
+import scala.tools.nsc.{Global, Settings}
 
 /** Test infrastructure for goron optimizer tests.
   *
@@ -483,15 +482,7 @@ object GoronTesting {
     val settings = CompilerSettings.fromConfig(config)
     val reporter = BackendReporting.SilentReporter
 
-    val bt: BTypes = new BTypes { btSelf =>
-      val compilerSettings: CompilerSettings = settings
-      val classpath: Classpath = cp
-      val backendReporting: BackendReporting.Reporter = reporter
-      lazy val coreBTypes: CoreBTypesFromClassfile { val bTypes: btSelf.type } =
-        new CoreBTypesFromClassfile { val bTypes: btSelf.type = btSelf }
-    }
-    new PostProcessor {
-      val bTypes: bt.type = bt
-    }
+    val bTypes: BTypes = new BTypes(settings, cp, reporter)
+    new PostProcessor(bTypes)
   }
 }

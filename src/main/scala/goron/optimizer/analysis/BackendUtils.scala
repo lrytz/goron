@@ -33,7 +33,7 @@ abstract class BackendUtils {
 
   import postProcessor.{bTypes, bTypesFromClassfile, callGraph}
   import bTypes._
-  import coreBTypes._
+  import CoreBTypes._
   def compilerSettings: goron.optimizer.CompilerSettings = bTypes.compilerSettings
 
   /** Classes with indyLambda closure instantiations where the SAM type is serializable (e.g. Scala's FunctionN) need a

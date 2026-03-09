@@ -25,12 +25,12 @@ import scala.tools.asm.tree._
 abstract class ClosureOptimizer {
   val postProcessor: PostProcessor
 
-  import postProcessor.{bTypes, _}
+  import postProcessor._
   import bTypes._
+  import CoreBTypes._
   import bTypesFromClassfile._
   import backendUtils._
   import callGraph._
-  import coreBTypes._
   def backendReporting: goron.optimizer.BackendReporting.Reporter = bTypes.backendReporting
 
   import ClosureOptimizer._

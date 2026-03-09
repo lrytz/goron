@@ -455,7 +455,7 @@ abstract class CopyProp {
               handleInputs(prod, Type.getArgumentTypes(methodInsn.desc).length + receiver)
             } else if (isScalaUnbox(methodInsn)) {
               val tp = primitiveAsmTypeToBType(Type.getReturnType(methodInsn.desc))
-              val boxTp = bTypes.coreBTypes.boxedClassOfPrimitive(tp)
+              val boxTp = bTypes.CoreBTypes.boxedClassOfPrimitive(tp)
               toInsertBefore(methodInsn) = List(new TypeInsnNode(CHECKCAST, boxTp.internalName), new InsnNode(POP))
               toRemove += prod
               callGraph.removeCallsite(methodInsn, method)

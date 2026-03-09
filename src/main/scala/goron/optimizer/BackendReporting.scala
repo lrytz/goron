@@ -353,7 +353,7 @@ object BackendReporting {
     }
 
     def emitWarning(settings: CompilerSettings): Boolean = this match {
-      case NoInlineInfoAttribute(_)                             => settings.optWarningNoInlineMissingScalaInlineInfoAttr
+      case NoInlineInfoAttribute(_)            => settings.optWarningNoInlineMissingScalaInlineInfoAttr
       case UnknownScalaInlineInfoVersion(_, _) => settings.optWarningNoInlineMissingScalaInlineInfoAttr
     }
   }

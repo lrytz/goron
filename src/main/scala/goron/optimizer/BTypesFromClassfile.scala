@@ -22,7 +22,7 @@ abstract class BTypesFromClassfile {
 
   import postProcessor.{bTypes, byteCodeRepository, inlinerHeuristics}
   import bTypes._
-  import coreBTypes._
+  import CoreBTypes._
   def compilerSettings: CompilerSettings = bTypes.compilerSettings
 
   /** Obtain the BType for a type descriptor or internal name. For class descriptors, the ClassBType is constructed by

@@ -9,9 +9,9 @@ package goron.optimizer.opt
 
 import goron.optimizer.BTypes.InternalName
 import goron.optimizer.BackendReporting.{CalleeNotFinal, OptimizerWarning}
+import goron.optimizer.PostProcessor
 import goron.optimizer.analysis.BackendUtils
 import goron.optimizer.opt.InlinerHeuristics._
-import goron.optimizer.PostProcessor
 
 import java.util.regex.Pattern
 import scala.annotation.tailrec
@@ -273,7 +273,7 @@ abstract class InlinerHeuristics {
             if (
               Type
                 .getArgumentTypes(callee.callee.desc)
-                .exists(tp => coreBTypes.srRefCreateMethods.contains(tp.getInternalName))
+                .exists(tp => CoreBTypes.srRefCreateMethods.contains(tp.getInternalName))
             ) Some(RefParam)
             else None
 

@@ -7,10 +7,10 @@
 
 package goron
 
-import scala.tools.asm
-import scala.tools.asm.tree.ClassNode
 import goron.optimizer._
 import goron.optimizer.opt.InlineInfoAttributePrototype
+
+import scala.tools.asm
 
 object Goron {
   def run(config: GoronConfig): Unit = {
@@ -159,15 +159,7 @@ object Goron {
       cp: Classpath,
       reporter: BackendReporting.Reporter
   ): PostProcessor = {
-    val bt: BTypes = new BTypes { btSelf =>
-      val compilerSettings: CompilerSettings = settings
-      val classpath: Classpath = cp
-      val backendReporting: BackendReporting.Reporter = reporter
-      lazy val coreBTypes: CoreBTypesFromClassfile { val bTypes: btSelf.type } =
-        new CoreBTypesFromClassfile { val bTypes: btSelf.type = btSelf }
-    }
-    new PostProcessor {
-      val bTypes: bt.type = bt
-    }
+    val bTypes: BTypes = new BTypes(settings, cp, reporter)
+    new PostProcessor(bTypes)
   }
 }

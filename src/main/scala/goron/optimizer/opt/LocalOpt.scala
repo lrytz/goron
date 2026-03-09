@@ -131,9 +131,9 @@ abstract class LocalOpt {
 
   import postProcessor._
   import bTypes._
+  import CoreBTypes._
   import bTypesFromClassfile._
   import backendUtils._
-  import coreBTypes._
   def compilerSettings: goron.optimizer.CompilerSettings = postProcessor.bTypes.compilerSettings
 
   import LocalOptImpls._

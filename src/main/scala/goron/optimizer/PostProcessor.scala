@@ -16,9 +16,8 @@ import scala.tools.asm.tree.ClassNode
 
 /** Implements optimizations, post-processing, and classfile serialization.
   */
-abstract class PostProcessor {
+final class PostProcessor(val bTypes: BTypes) {
   self =>
-  val bTypes: BTypes
 
   import bTypes._
 

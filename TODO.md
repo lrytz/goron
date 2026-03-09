@@ -4,7 +4,6 @@
 - [x] Improve CLI output: show progress and stats during optimization (classes parsed, reachable, inlined, eliminated, etc.)
 - [ ] Create an sbt plugin
 - [ ] Parallelize local optimizations and serialization (per-class, no shared mutable state)
-- [ ] Remove path-dependent types / cake pattern from optimizer fork (move ClassBType, Callsite, etc. to top-level types; replace abstract vals + singleton type refinements with constructor parameters)
 - [x] Clean up compiler leftovers in optimizer fork:
   - Remove `ClassBTypeFromSymbol` and `fromSymbol` flag (always false, never read)
   - Remove `frontendSynch` (no-op wrapper, inline all call sites)
