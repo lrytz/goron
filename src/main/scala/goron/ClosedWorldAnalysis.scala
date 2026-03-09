@@ -147,32 +147,4 @@ object ClosedWorldAnalysis {
     }
   }
 
-  /** Devirtualize monomorphic call sites: replace invokevirtual/invokeinterface with invokestatic for final methods in
-    * final classes, when the receiver type can be precisely determined.
-    *
-    * This is a conservative version that only devirtualizes calls on classes that are effectively final (no subclasses
-    * in the closed world).
-    */
-  def devirtualize(classNodes: Iterable[ClassNode], hierarchy: ClassHierarchy): Int = {
-    var count = 0
-    for (cn <- classNodes; mn <- cn.methods.asScala if mn.instructions != null) {
-      val iter = mn.instructions.iterator()
-      while (iter.hasNext) {
-        iter.next() match {
-          case mi: scala.tools.asm.tree.MethodInsnNode
-              if (mi.getOpcode == Opcodes.INVOKEVIRTUAL || mi.getOpcode == Opcodes.INVOKEINTERFACE)
-                && hierarchy.effectivelyFinalClasses.contains(mi.owner)
-                && hierarchy.effectivelyFinalMethods.contains((mi.owner, mi.name, mi.desc)) =>
-            // This call can be devirtualized — the receiver class has no subclasses
-            // and the method has no overrides. But we can't just change to invokestatic
-            // because the method isn't actually static. We leave this as-is for now
-            // and let the JIT devirtualize it. The ACC_FINAL marking already helps.
-            // A full devirtualization would require creating a static forwarder.
-            count += 1
-          case _ =>
-        }
-      }
-    }
-    count
-  }
 }

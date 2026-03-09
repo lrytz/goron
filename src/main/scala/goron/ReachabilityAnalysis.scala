@@ -413,55 +413,6 @@ object ReachabilityAnalysis {
     if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
   }
 
-  /** Collect class references from instruction nodes. */
-  private def collectInstructionClassRefs(mn: MethodNode, enqueue: String => Unit): Unit = {
-    if (mn.instructions == null) return
-    val iter = mn.instructions.iterator()
-    while (iter.hasNext) {
-      iter.next() match {
-        case mi: MethodInsnNode =>
-          enqueue(mi.owner)
-          addMethodDescClassRefs(mi.desc, enqueue)
-        case fi: FieldInsnNode =>
-          enqueue(fi.owner)
-          addTypeDescClassRefs(fi.desc, enqueue)
-        case ti: TypeInsnNode =>
-          addInternalOrArrayClassRef(ti.desc, enqueue)
-        case mri: MultiANewArrayInsnNode =>
-          addTypeDescClassRefs(mri.desc, enqueue)
-        case ldc: LdcInsnNode =>
-          ldc.cst match {
-            case t: Type =>
-              if (t.getSort == Type.OBJECT) enqueue(t.getInternalName)
-              else if (t.getSort == Type.ARRAY) addTypeDescClassRefs(t.getDescriptor, enqueue)
-              else if (t.getSort == Type.METHOD) addMethodDescClassRefs(t.getDescriptor, enqueue)
-            case h: Handle =>
-              enqueue(h.getOwner)
-              addMethodDescClassRefs(h.getDesc, enqueue)
-            case _ =>
-          }
-        case inv: InvokeDynamicInsnNode =>
-          addMethodDescClassRefs(inv.desc, enqueue)
-          if (inv.bsm != null) {
-            enqueue(inv.bsm.getOwner)
-            addMethodDescClassRefs(inv.bsm.getDesc, enqueue)
-          }
-          if (inv.bsmArgs != null) {
-            for (arg <- inv.bsmArgs) arg match {
-              case t: Type =>
-                if (t.getSort == Type.OBJECT) enqueue(t.getInternalName)
-                else if (t.getSort == Type.METHOD) addMethodDescClassRefs(t.getDescriptor, enqueue)
-              case h: Handle =>
-                enqueue(h.getOwner)
-                addMethodDescClassRefs(h.getDesc, enqueue)
-              case _ =>
-            }
-          }
-        case _ =>
-      }
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------

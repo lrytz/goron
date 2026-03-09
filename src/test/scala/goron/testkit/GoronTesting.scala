@@ -299,7 +299,6 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     // bytecode. Scala-library classes NOT in classBytes are blocked (they were
     // DCE'd and shouldn't be available). Only JDK and test infrastructure classes
     // delegate to the parent.
-    val allSurvivorNames = classBytes.keySet
     val parentCl = getClass.getClassLoader
     val cl = new ClassLoader(parentCl) {
       override def loadClass(name: String, resolve: Boolean): Class[_] = {
