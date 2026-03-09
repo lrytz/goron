@@ -1,0 +1,13 @@
+# docker compose build && docker compose run --rm claude
+# claude --dangerously-skip-permissions
+services:
+  claude:
+    build: .
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/project
+      - home:/home/node
+
+volumes:
+  home:
