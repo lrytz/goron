@@ -30,9 +30,6 @@ abstract class BTypes {
   val classpath: goron.Classpath
   val backendReporting: BackendReporting.Reporter
 
-  // Replaces frontendSynch — no compiler frontend to synchronize with
-  @inline final def frontendSynch[T](x: => T): T = x
-
   val coreBTypes: CoreBTypes { val bTypes: BTypes.this.type }
   import coreBTypes._
 
@@ -554,25 +551,12 @@ abstract class BTypes {
    */
 
   /** A ClassBType represents a class or interface type. The necessary information to build a ClassBType is extracted
-    * from compiler symbols and types, see BTypesFromSymbols.
+    * from classfiles via BTypesFromClassfile.
     *
-    * The `info` field contains either the class information on an error message why the info could not be computed.
-    * There are two reasons for an erroneous info:
-    *   1. The ClassBType was built from a class symbol that stems from a java source file, and the symbol's type could
-    *      not be completed successfully (scala/bug#9111)
-    *   2. The ClassBType should be built from a classfile, but the class could not be found on the compilation
-    *      classpath.
-    *
-    * Note that all ClassBTypes required in a non-optimized run are built during code generation from the class symbols
-    * referenced by the ASTs, so they have a valid info. Therefore the backend often invokes `info.get` (which asserts
-    * the info to exist) when reading data from the ClassBType.
-    *
-    * The inliner on the other hand uses ClassBTypes that are built from classfiles, which may have a missing info. In
-    * order not to crash the compiler unnecessarily, the inliner does not force infos using `get`, but it reports
-    * inliner warnings for missing infos that prevent inlining.
+    * The `info` field contains either the class information or an error message why the info could not be computed
+    * (e.g. if the class could not be found on the classpath).
     */
   sealed abstract class ClassBType protected (val internalName: InternalName) extends RefBType {
-    def fromSymbol: Boolean
 
     /** Write-once variable allows initializing a cyclic graph of infos. This is required for nested classes. Example:
       * for the definition `class A { class B }` we have
@@ -607,7 +591,7 @@ abstract class BTypes {
 
       assert(
         if (info.get.superClass.isEmpty) {
-          isJLO(this) || (isCompilingPrimitive && ClassBType.hasNoSuper(internalName))
+          isJLO(this)
         } else if (isInterface.get) isJLO(info.get.superClass.get)
         else !isJLO(this) && ifInit(info.get.superClass.get)(!_.isInterface.get),
         s"Invalid superClass in $this: ${info.get.superClass}"
@@ -685,11 +669,7 @@ abstract class BTypes {
       }
 
     def inlineInfoAttribute: Either[NoClassBTypeInfo, InlineInfoAttribute] = info.map(i => {
-      // InlineInfos are serialized for classes being compiled. For those the info was built by
-      // buildInlineInfoFromClassSymbol, which only adds a warning under scala/bug#9111, which in turn
-      // only happens for class symbols of java source files.
-      // we could put this assertion into InlineInfoAttribute, but it is more safe to put it here
-      // where it affect only GenBCode, and not add any assertion to GenASM in 2.11.6.
+      // InlineInfos serialized for classes should not have warnings.
       assert(i.inlineInfo.warning.isEmpty, i.inlineInfo.warning)
       InlineInfoAttribute(i.inlineInfo)
     })
@@ -798,32 +778,23 @@ abstract class BTypes {
     def unapply(cr: ClassBType): Some[InternalName] = Some(cr.internalName)
 
     /** Retrieve the `ClassBType` for the class with the given internal name, creating the entry if it doesn't already
-      * exist
+      * exist.
       *
       * @param internalName
       *   The name of the class
       * @param t
-      *   A value that will be passed to the `init` function. For efficiency, callers should use this value rather than
-      *   capturing it in the `init` lambda, allowing that lambda to be hoisted.
-      * @param fromSymbol
-      *   Is this type being initialized from a `Symbol`, rather than from byte code?
+      *   A value that will be passed to the `init` function.
       * @param init
       *   Function to initialize the info of this `BType`. During execution of this function, code _may_ reenter into
       *   `apply(internalName, ...)` and retrieve the initializing `ClassBType`.
-      * @tparam T
-      *   The type of the state that will be threaded into the `init` function.
-      * @return
-      *   The `ClassBType`
       */
-    final def apply[T](internalName: InternalName, t: T, fromSymbol: Boolean)(
+    final def apply[T](internalName: InternalName, t: T)(
         init: (ClassBType, T) => Either[NoClassBTypeInfo, ClassInfo]
     ): ClassBType = {
       val cached = classBTypeCache.get(internalName)
       if (cached ne null) cached
       else {
-        val newRes =
-          if (fromSymbol) new ClassBTypeFromSymbol(internalName)
-          else new ClassBTypeFromClassfile(internalName)
+        val newRes: ClassBType = new ClassBTypeImpl(internalName)
         // synchronized is required to ensure proper initialisation of info.
         // see comment on def info
         newRes.synchronized {
@@ -839,12 +810,7 @@ abstract class BTypes {
       }
     }
   }
-  private final class ClassBTypeFromSymbol(internalName: InternalName) extends ClassBType(internalName) {
-    override def fromSymbol: Boolean = true
-  }
-  private final class ClassBTypeFromClassfile(internalName: InternalName) extends ClassBType(internalName) {
-    override def fromSymbol: Boolean = false
-  }
+  private final class ClassBTypeImpl(internalName: InternalName) extends ClassBType(internalName)
 
   /** The type info for a class. Used for symboltable-independent subtype checks in the backend.
     *
@@ -966,19 +932,6 @@ abstract class BTypes {
     */
   final case class MethodNameAndType(name: String, methodType: MethodBType)
 
-  /** True if the current compilation unit is of a primitive class (scala.Boolean et al). Used only in assertions.
-    * Abstract here because its implementation depends on global.
-    */
-  def isCompilingPrimitive: Boolean
-
-  // The [[Lazy]] and [[LazyVar]] classes would conceptually be better placed within
-  // PostProcessorFrontendAccess (they may access the `frontendLock` defined in that class). However,
-  // for every component in which we define nested classes, we need to make sure that the compiler
-  // knows that all component instances (val frontendAccess) in various classes are all the same,
-  // otherwise the prefixes don't match and we get type mismatch errors.
-  // Since we already do this dance (val bTypes: GenBCode.this.bTypes.type = GenBCode.this.bTypes)
-  // for BTypes, it's easier to add those nested classes to BTypes.
-
   abstract sealed class Lazy[+T] {
 
     /** get the result of the lazy value, calculating the result and performing the additional actions if the value is
@@ -1080,41 +1033,6 @@ abstract class BTypes {
     }
   }
 
-  /** Create state that lazily evaluated (to work around / not worry about initialization ordering issues). The state is
-    * cleared in each compiler run when the component is initialized.
-    */
-  def perRunLazy[T](component: PerRunInit)(init: => T): LazyVar[T] = {
-    val r = new LazyVar(() => init)
-    component.perRunInit(r.reInitialize())
-    r
-  }
-
-  /** This implements a lazy value that can be reset and re-initialized. It synchronizes on `frontendLock` so that lazy
-    * state created through this utility can be safely initialized in the post-processor.
-    *
-    * Note that values defined as `LazyVar`s are usually `lazy val`s themselves (created through the `perRunLazy`
-    * method). This ensures that re-initializing a component only clears those `LazyVar`s that have actually been used
-    * in the previous compiler run.
-    */
-  class LazyVar[T](init: () => T) {
-    @volatile private[this] var isInit: Boolean = false
-    private[this] var v: T = _
-
-    def get: T = {
-      if (isInit) v
-      else
-        this.synchronized {
-          if (!isInit) v = init()
-          isInit = true
-          v
-        }
-    }
-
-    def reInitialize(): Unit = this.synchronized {
-      v = null.asInstanceOf[T]
-      isInit = false
-    }
-  }
 }
 
 object BTypes {
@@ -1186,9 +1104,4 @@ object BTypes {
 
   // when inlining, local variable names of the callee are prefixed with the name of the callee method
   val InlinedLocalVariablePrefixMaxLength = 128
-}
-
-final class ClearableJConcurrentHashMap[K, V] extends scala.collection.mutable.Clearable {
-  val map = new java.util.concurrent.ConcurrentHashMap[K, V]
-  override def clear(): Unit = map.clear()
 }

@@ -38,7 +38,6 @@ object Goron {
       if (config.verbose) BackendReporting.ConsoleReporter
       else BackendReporting.SilentReporter
     val pp = createPostProcessor(settings, classpath, reporter)
-    pp.initialize()
 
     // Parse all class entries into ClassNodes (using ClassNode1 for LabelNode1 support)
     log("Parsing class files...")
@@ -164,7 +163,6 @@ object Goron {
       val compilerSettings: CompilerSettings = settings
       val classpath: Classpath = cp
       val backendReporting: BackendReporting.Reporter = reporter
-      def isCompilingPrimitive: Boolean = false
       lazy val coreBTypes: CoreBTypesFromClassfile { val bTypes: btSelf.type } =
         new CoreBTypesFromClassfile { val bTypes: btSelf.type = btSelf }
     }

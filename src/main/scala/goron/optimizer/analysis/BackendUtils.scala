@@ -10,7 +10,7 @@ package goron.optimizer.analysis
 import goron.optimizer.BTypes._
 import goron.optimizer.analysis.BackendUtils._
 import goron.optimizer.opt.BytecodeUtils.{INSTANCE_CONSTRUCTOR_NAME, _}
-import goron.optimizer.{LabelNode1, PerRunInit, Position, PostProcessor}
+import goron.optimizer.{LabelNode1, Position, PostProcessor}
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.annotation.{switch, tailrec}
@@ -28,7 +28,7 @@ import scala.util.control.{NoStackTrace, NonFatal}
   *
   * TODO: move out of `analysis` package?
   */
-abstract class BackendUtils extends PerRunInit {
+abstract class BackendUtils {
   val postProcessor: PostProcessor
 
   import postProcessor.{bTypes, bTypesFromClassfile, callGraph}
@@ -46,7 +46,7 @@ abstract class BackendUtils extends PerRunInit {
     (new ConcurrentHashMap)
 
   // unused objects created by these constructors are eliminated by pushPop
-  private[this] lazy val sideEffectFreeConstructors: LazyVar[Set[(String, String)]] = perRunLazy(this) {
+  private[this] lazy val sideEffectFreeConstructors: Set[(String, String)] = {
     val ownerDesc = (p: (InternalName, MethodNameAndType)) => (p._1, p._2.methodType.descriptor)
     primitiveBoxConstructors.map(ownerDesc).toSet ++
       srRefConstructors.map(ownerDesc) ++
@@ -58,10 +58,10 @@ abstract class BackendUtils extends PerRunInit {
       )
   }
 
-  private[this] lazy val classesOfSideEffectFreeConstructors: LazyVar[Set[String]] =
-    perRunLazy(this)(sideEffectFreeConstructors.get.map(_._1))
+  private[this] lazy val classesOfSideEffectFreeConstructors: Set[String] =
+    sideEffectFreeConstructors.map(_._1)
 
-  lazy val classfileVersion: LazyVar[Int] = perRunLazy(this)(compilerSettings.target match {
+  lazy val classfileVersion: Int = compilerSettings.target match {
     case "8"  => asm.Opcodes.V1_8
     case "9"  => asm.Opcodes.V9
     case "10" => asm.Opcodes.V10
@@ -82,11 +82,10 @@ abstract class BackendUtils extends PerRunInit {
     case "25" => 0 << 16 | 69 // V25
     case "26" => 0 << 16 | 70 // V26
     // to be continued...
-  })
+  }
 
-  lazy val extraProc: LazyVar[Int] = perRunLazy(this)(
+  lazy val extraProc: Int =
     asm.ClassWriter.COMPUTE_MAXS | asm.ClassWriter.COMPUTE_FRAMES
-  )
 
   /*
    * Add:
@@ -300,13 +299,13 @@ abstract class BackendUtils extends PerRunInit {
   def isTupleConstructor(insn: MethodInsnNode): Boolean = calleeInMap(insn, tupleClassConstructors)
 
   def isSideEffectFreeConstructorCall(insn: MethodInsnNode): Boolean = {
-    insn.name == INSTANCE_CONSTRUCTOR_NAME && sideEffectFreeConstructors.get((insn.owner, insn.desc))
+    insn.name == INSTANCE_CONSTRUCTOR_NAME && sideEffectFreeConstructors((insn.owner, insn.desc))
   }
 
   def isNewForSideEffectFreeConstructor(insn: AbstractInsnNode): Boolean = {
     insn.getOpcode == NEW && {
       val ti = insn.asInstanceOf[TypeInsnNode]
-      classesOfSideEffectFreeConstructors.get.contains(ti.desc)
+      classesOfSideEffectFreeConstructors.contains(ti.desc)
     }
   }
 

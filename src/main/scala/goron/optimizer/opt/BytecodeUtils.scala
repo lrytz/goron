@@ -21,7 +21,7 @@ import scala.tools.asm.{Label, Type}
 
 object BytecodeUtils {
 
-  // Constants from GenBCode (replaces import GenBCode._)
+  // Well-known JVM bytecode constants
   final val INSTANCE_CONSTRUCTOR_NAME = "<init>"
   final val CLASS_CONSTRUCTOR_NAME = "<clinit>"
   final val PublicStatic = ACC_PUBLIC | ACC_STATIC

@@ -14,10 +14,9 @@ import scala.collection.mutable
 import scala.tools.asm.ClassWriter
 import scala.tools.asm.tree.ClassNode
 
-/** Implements late stages of the backend that don't depend on a Global instance, i.e., optimizations, post-processing
-  * and classfile serialization and writing.
+/** Implements optimizations, post-processing, and classfile serialization.
   */
-abstract class PostProcessor extends PerRunInit {
+abstract class PostProcessor {
   self =>
   val bTypes: BTypes
 
@@ -43,13 +42,6 @@ abstract class PostProcessor extends PerRunInit {
   lazy val callGraph: CallGraph { val postProcessor: self.type } = new CallGraph { val postProcessor: self.type = self }
   lazy val bTypesFromClassfile: BTypesFromClassfile { val postProcessor: self.type } = new BTypesFromClassfile {
     val postProcessor: self.type = self
-  }
-
-  override def initialize(): Unit = {
-    super.initialize()
-    backendUtils.initialize()
-    inlinerHeuristics.initialize()
-    byteCodeRepository.initialize()
   }
 
   /** Run global optimizations: build call graph, inline, optimize closures. Called by goron after all classes have been
@@ -80,7 +72,7 @@ abstract class PostProcessor extends PerRunInit {
   }
 
   def serializeClass(classNode: ClassNode): Array[Byte] = {
-    val cw = new ClassWriterWithBTypeLub(backendUtils.extraProc.get)
+    val cw = new ClassWriterWithBTypeLub(backendUtils.extraProc)
     classNode.accept(cw)
     cw.toByteArray
   }

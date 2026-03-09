@@ -11,7 +11,7 @@ import goron.optimizer.BTypes.InternalName
 import goron.optimizer.BackendReporting.{CalleeNotFinal, OptimizerWarning}
 import goron.optimizer.analysis.BackendUtils
 import goron.optimizer.opt.InlinerHeuristics._
-import goron.optimizer.{PerRunInit, PostProcessor}
+import goron.optimizer.PostProcessor
 
 import java.util.regex.Pattern
 import scala.annotation.tailrec
@@ -20,7 +20,7 @@ import scala.jdk.CollectionConverters._
 import scala.tools.asm.Type
 import scala.tools.asm.tree.MethodNode
 
-abstract class InlinerHeuristics extends PerRunInit {
+abstract class InlinerHeuristics {
   val postProcessor: PostProcessor
 
   import postProcessor._
@@ -29,8 +29,8 @@ abstract class InlinerHeuristics extends PerRunInit {
   def compilerSettings: goron.optimizer.CompilerSettings = bTypes.compilerSettings
   def backendReporting: goron.optimizer.BackendReporting.Reporter = bTypes.backendReporting
 
-  lazy val inlineSourceMatcher: LazyVar[InlineSourceMatcher] =
-    perRunLazy(this)(new InlineSourceMatcher(compilerSettings.optInlineFrom))
+  lazy val inlineSourceMatcher: InlineSourceMatcher =
+    new InlineSourceMatcher(compilerSettings.optInlineFrom)
 
   final case class InlineRequest(callsite: Callsite, reason: InlineReason) {
     // non-null if `-Yopt-log-inline` is active, it explains why the callsite was selected for inlining
@@ -78,8 +78,8 @@ abstract class InlinerHeuristics extends PerRunInit {
   }
 
   def canInlineFromSource(sourceFilePath: Option[String], calleeDeclarationClass: InternalName): Boolean = {
-    inlineSourceMatcher.get.allowFromSources && sourceFilePath.isDefined ||
-    inlineSourceMatcher.get.allow(calleeDeclarationClass)
+    inlineSourceMatcher.allowFromSources && sourceFilePath.isDefined ||
+    inlineSourceMatcher.allow(calleeDeclarationClass)
   }
 
   /** Select callsites from the call graph that should be inlined, grouped by the containing method. Cyclic inlining

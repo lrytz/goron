@@ -54,7 +54,7 @@ Entry points are classes reachable by the JVM at startup (main classes, reflecti
 
 **Two-phase reachability analysis** (`ReachabilityAnalysis.scala`):
 - Phase 1 (method-level BFS): follows only methods that are actually called, resolving virtual dispatch and inherited methods through the class hierarchy.
-- Phase 2 (load closure): ensures all classes referenced in method bodies of retained classes exist, since the JVM verifier may resolve constant pool entries eagerly.
+- Phase 2 (load closure): transitively includes supertypes of execution-reachable classes, since the JVM eagerly verifies the type hierarchy during class loading.
 
 **ScalaInlineInfo attribute**: Scala-compiled classes carry a custom `ScalaInlineInfo` attribute with inline hints and `effectivelyFinal` flags. Must pass `InlineInfoAttributePrototype` to `ClassReader.accept()` or the attribute is silently dropped. The inliner uses `InlineInfo.effectivelyFinal` (from this attribute) rather than ACC_FINAL for dispatch resolution.
 
@@ -79,5 +79,4 @@ Tests use munit. The `GoronTesting` trait provides:
 ## Known Limitations
 
 - **Reflection**: Classes loaded via reflection (e.g., `Class.forName`, `ScalaClassLoader.create`) are invisible to static analysis. They must be specified as `--entry` points.
-- **No method-level elimination**: Goron eliminates unused classes but does not strip unused methods from retained classes.
 - **JDK classes**: JDK internal classes are resolved at runtime via classloader fallback, not included in the optimized jar.

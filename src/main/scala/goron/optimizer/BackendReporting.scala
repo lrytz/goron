@@ -348,32 +348,21 @@ object BackendReporting {
       case NoInlineInfoAttribute(internalName) =>
         s"The Scala classfile $internalName does not have a ScalaInlineInfo attribute."
 
-      case ClassSymbolInfoFailureSI9111(classFullName) =>
-        s"Failed to get the type of a method of class symbol $classFullName due to scala/bug#9111."
-
-      case ClassNotFoundWhenBuildingInlineInfoFromSymbol(missingClass) =>
-        s"Failed to build the inline information: $missingClass"
-
       case UnknownScalaInlineInfoVersion(internalName, version) =>
         s"Cannot read ScalaInlineInfo version $version in classfile $internalName. Use a more recent compiler."
     }
 
     def emitWarning(settings: CompilerSettings): Boolean = this match {
       case NoInlineInfoAttribute(_)                             => settings.optWarningNoInlineMissingScalaInlineInfoAttr
-      case ClassNotFoundWhenBuildingInlineInfoFromSymbol(cause) => cause.emitWarning(settings)
-      case ClassSymbolInfoFailureSI9111(_)                      => settings.optWarningNoInlineMissingBytecode
-      case UnknownScalaInlineInfoVersion(_, _)                  => settings.optWarningNoInlineMissingScalaInlineInfoAttr
+      case UnknownScalaInlineInfoVersion(_, _) => settings.optWarningNoInlineMissingScalaInlineInfoAttr
     }
   }
 
   final case class NoInlineInfoAttribute(internalName: InternalName) extends ClassInlineInfoWarning
-  final case class ClassSymbolInfoFailureSI9111(classFullName: String) extends ClassInlineInfoWarning
-  final case class ClassNotFoundWhenBuildingInlineInfoFromSymbol(missingClass: ClassNotFound)
-      extends ClassInlineInfoWarning
   final case class UnknownScalaInlineInfoVersion(internalName: InternalName, version: Int)
       extends ClassInlineInfoWarning
 
-  /** Reporter trait — replaces PostProcessorFrontendAccess.BackendReporting.
+  /** Reporter trait for optimizer diagnostics.
     */
   trait Reporter {
     def siteString(owner: InternalName, method: String): String = {

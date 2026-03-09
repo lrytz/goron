@@ -12,7 +12,7 @@ import goron.optimizer.BackendReporting._
 import goron.optimizer.Position.NoPosition
 import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
 import goron.optimizer.opt.BytecodeUtils._
-import goron.optimizer.{PerRunInit, PostProcessor}
+import goron.optimizer.PostProcessor
 
 import scala.annotation.nowarn
 import scala.collection.{concurrent, mutable}
@@ -24,7 +24,7 @@ import scala.tools.asm.{Attribute, Type}
 /** The ByteCodeRepository provides utilities to read the bytecode of classfiles from the compilation classpath. Parsed
   * classes are cached in the `classes` map.
   */
-abstract class ByteCodeRepository extends PerRunInit {
+abstract class ByteCodeRepository {
   val postProcessor: PostProcessor
 
   import postProcessor.{bTypes, bTypesFromClassfile}

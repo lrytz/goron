@@ -11,7 +11,7 @@ import goron.optimizer.BTypes.InternalName
 
 import scala.tools.asm.{Handle, Opcodes}
 
-abstract class CoreBTypes extends PerRunInit {
+abstract class CoreBTypes {
   val bTypes: BTypes
   import bTypes._
 
@@ -58,8 +58,7 @@ abstract class CoreBTypes extends PerRunInit {
   def lambdaDeserializeBootstrapHandle: Handle
 }
 
-/** Initializes CoreBTypes from well-known internal class names (no compiler symbols needed). This is goron's
-  * replacement for CoreBTypesFromSymbols.
+/** Initializes CoreBTypes from well-known internal class names, resolved from the classpath.
   */
 abstract class CoreBTypesFromClassfile extends CoreBTypes {
   val bTypes: BTypes
@@ -77,7 +76,7 @@ abstract class CoreBTypesFromClassfile extends CoreBTypes {
     // For core types like java/lang/Object, they will be loaded early.
     //
     // The init function resolves from the classpath directly.
-    ClassBType(internalName, (bTypes.classpath, internalName), fromSymbol = false) { case (res, (cp, iname)) =>
+    ClassBType(internalName, (bTypes.classpath, internalName)) { case (res, (cp, iname)) =>
       cp.findClassBytes(iname) match {
         case None =>
           Left(
