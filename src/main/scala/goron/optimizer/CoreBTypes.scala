@@ -106,7 +106,7 @@ abstract class CoreBTypesFromClassfile extends CoreBTypes {
     val flags = classNode.access
     // For core types, we don't need nested class info or inline info
     Right(
-      ClassInfo(superClass, interfaces, flags, Lazy.withoutLock(Nil), Lazy.withoutLock(None), BTypes.EmptyInlineInfo)
+      ClassInfo(superClass, interfaces, flags, Lazy(Nil), Lazy(None), BTypes.EmptyInlineInfo)
     )
   }
 

@@ -147,8 +147,8 @@ abstract class BTypesFromClassfile {
         superClass,
         interfaces,
         flags,
-        Lazy.withoutLock(nestedClasses),
-        Lazy.withoutLock(nestedInfo),
+        Lazy(nestedClasses),
+        Lazy(nestedInfo),
         inlineInfo
       )
     )

@@ -942,9 +942,6 @@ abstract class BTypes {
   object Lazy {
     def apply[T <: AnyRef](t: => T): Lazy[T] = new Deferred[T](() => t)
 
-    /** Alias for source compatibility with existing call sites. */
-    def withoutLock[T <: AnyRef](t: => T): Lazy[T] = apply(t)
-
     private final class Deferred[T <: AnyRef](private var t: () => T) extends Lazy[T] {
       @volatile private var value: T = _
       private var postForce: List[T => Unit] = Nil
