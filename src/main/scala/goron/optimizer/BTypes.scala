@@ -757,20 +757,6 @@ class BTypes(
   }
 
   object ClassBType {
-    // Primitive classes have no super class. A ClassBType for those is only created when
-    // they are actually being compiled (e.g., when compiling scala/Boolean.scala).
-    private val hasNoSuper = Set(
-      "scala/Unit",
-      "scala/Boolean",
-      "scala/Char",
-      "scala/Byte",
-      "scala/Short",
-      "scala/Int",
-      "scala/Float",
-      "scala/Long",
-      "scala/Double"
-    )
-
     private val isInternalPhantomType = Set(
       "scala/Null",
       "scala/Nothing"
@@ -990,8 +976,6 @@ class BTypes(
     lazy val jlCloneableRef: ClassBType = classBType("java/lang/Cloneable")
     lazy val jiSerializableRef: ClassBType = classBType("java/io/Serializable")
     lazy val jlIllegalArgExceptionRef: ClassBType = classBType("java/lang/IllegalArgumentException")
-    lazy val juHashMapRef: ClassBType = classBType("java/util/HashMap")
-    lazy val juMapRef: ClassBType = classBType("java/util/Map")
     lazy val jliCallSiteRef: ClassBType = classBType("java/lang/invoke/CallSite")
     lazy val jliLambdaMetafactoryRef: ClassBType = classBType("java/lang/invoke/LambdaMetafactory")
     lazy val jliMethodTypeRef: ClassBType = classBType("java/lang/invoke/MethodType")
@@ -1242,18 +1226,7 @@ object BTypes {
       sam: Option[String],
       methodInfos: collection.SortedMap[(String, String), MethodInlineInfo],
       warning: Option[ClassInlineInfoWarning]
-  ) {
-    lazy val methodInfosSorted: IndexedSeq[((String, String), MethodInlineInfo)] = {
-      val result = new Array[((String, String), MethodInlineInfo)](methodInfos.size)
-      var i = 0
-      methodInfos.foreachEntry { (ownerAndName, info) =>
-        result(i) = (ownerAndName, info)
-        i += 1
-      }
-      scala.util.Sorting.quickSort(result)(Ordering.by(_._1))
-      unsafeWrapArray(result)
-    }
-  }
+  )
 
   val EmptyInlineInfo =
     InlineInfo(isEffectivelyFinal = false, sam = None, methodInfos = SortedMap.empty, warning = None)
