@@ -40,15 +40,6 @@ effectively-final methods on non-leaf Scala classes (previously only leaf-class 
 benefited via `ACC_FINAL`). On the scala-compiler benchmark, this enabled 1520 more methods
 to be stripped (26890 → 28410).
 
-### Make DCE incremental
-
-DCE (`Goron.scala:112–126`) runs a second full `reachableClassesAndMethods` BFS after
-inlining — re-parsing all method bodies, re-resolving all virtual calls, re-computing the
-entire reachable set from scratch (270s on scala-compiler). Consider an incremental approach:
-have the inliner export a change set (modified/added/removed methods), then re-analyze only
-affected methods and their transitive dependents. Requires the reachability analysis to
-support incremental updates, and the inliner to track what it changed.
-
 ### Improve error handling in LUB computation and external class loading
 
 Silent catch-all handlers mask real errors:
