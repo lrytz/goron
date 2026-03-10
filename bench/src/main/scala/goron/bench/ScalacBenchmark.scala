@@ -169,11 +169,8 @@ class ScalacBenchmark {
         val files = extractScalaSources(sourcesJar, dir)
         sourcesJar.delete()
 
-        // scalap depends on scala-library and scala-reflect
-        val scalaReflect = stockScalacJars
-          .find(_.getName.contains("scala-reflect"))
-          .getOrElse(throw new RuntimeException("scala-reflect not found"))
-        val cp = scalaLibrary.getAbsolutePath + File.pathSeparator + scalaReflect.getAbsolutePath
+        // scalap depends on scala-library, scala-reflect, and scala-compiler
+        val cp = stockScalacJars.map(_.getAbsolutePath).mkString(File.pathSeparator)
 
         (files, dir, cp)
 
