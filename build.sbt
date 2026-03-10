@@ -25,8 +25,8 @@ lazy val goron = (project in file("."))
     assembly / assemblyJarName := "goron.jar",
     scalacOptions ++= Seq(
       "-deprecation", "-feature", "-unchecked", "-Werror",
-      // Suppress warning inherent to path-dependent types in forked compiler code
-      "-Wconf:msg=The outer reference in this type test cannot be checked at run time:s",
+      // synthetic `equals` of final inner case classes
+      "-Wconf:msg=outer reference in this type test cannot be checked at run time:s",
     ),
   )
 
