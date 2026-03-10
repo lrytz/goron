@@ -32,13 +32,13 @@ Moved `collectExternalClassMethodsCached` from module-level into `methodLevelBFS
 passed as a parameter to `collectExternalClassMethods`. Cache is now created fresh per
 analysis run, eliminating the latent stale-state bug.
 
-### Connect closed-world analysis to the inliner
+### ~~Connect closed-world analysis to the inliner~~ (done)
 
-`ClosedWorldAnalysis` computes `effectivelyFinalMethods` for all classes but only applies
-`ACC_FINAL` flags to leaf classes in `applyToClassNodes`. The inliner uses
-`ScalaInlineInfo.effectivelyFinal` rather than `ACC_FINAL`, so closed-world knowledge about
-non-leaf effectively-final methods is computed but wasted. Update `InlineInfo` directly so
-the inliner can exploit effectively-final methods on non-leaf Scala classes.
+`applyToClassNodes` now updates the `ScalaInlineInfo` attribute on each ClassNode, marking
+methods as `effectivelyFinal` based on closed-world analysis. This lets the inliner exploit
+effectively-final methods on non-leaf Scala classes (previously only leaf-class methods
+benefited via `ACC_FINAL`). On the scala-compiler benchmark, this enabled 1520 more methods
+to be stripped (26890 → 28410).
 
 ### Make DCE incremental
 

@@ -7,6 +7,7 @@
 
 package goron
 
+import goron.optimizer.opt.InlineInfoAttribute
 import goron.testkit.GoronTesting
 
 import scala.jdk.CollectionConverters._
@@ -152,7 +153,10 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = true))
+    // Disable DCE so the method survives for inspection (with closed-world + inlining,
+    // the method may be inlined and then stripped, which is correct but prevents ACC_FINAL checks)
+    val survivors =
+      compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = true, eliminateDeadCode = false))
     val onlyImpl = findClass(survivors, "OnlyImpl")
     val computeMethod = getAsmMethod(onlyImpl, "compute")
     // In closed-world, OnlyImpl has no subclasses, so compute should be marked ACC_FINAL
@@ -161,6 +165,45 @@ class IntegrationTest extends GoronTesting {
       s"Expected compute to be marked ACC_FINAL in closed-world mode"
     )
     assertEquals(runMain(survivors), "42")
+  }
+
+  test("closed-world updates InlineInfo for non-leaf class methods") {
+    val code =
+      """abstract class Base {
+        |  def common(x: Int): Int = x + 1
+        |  def overridden(x: Int): Int = x
+        |}
+        |class Sub extends Base {
+        |  override def overridden(x: Int): Int = x * 2
+        |}
+        |object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val b: Base = new Sub
+        |    println(b.common(10) + b.overridden(5))
+        |  }
+        |}
+      """.stripMargin
+    // Disable DCE so methods survive for attribute inspection
+    val survivors =
+      compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = true, eliminateDeadCode = false))
+    val base = findClass(survivors, "Base")
+
+    // Read InlineInfo from the ScalaInlineInfo attribute
+    val inlineInfo = base.attrs.asScala.collectFirst { case a: InlineInfoAttribute => a.inlineInfo }
+    assert(inlineInfo.isDefined, "Base should have ScalaInlineInfo attribute")
+    val methodInfos = inlineInfo.get.methodInfos
+
+    // `common` has no override in Sub → should be effectively final via closed-world
+    val commonInfo = methodInfos.get(("common", "(I)I"))
+    assert(commonInfo.isDefined, s"common should be in InlineInfo: ${methodInfos.keys}")
+    assert(commonInfo.get.effectivelyFinal, "common should be effectively final (no overrides)")
+
+    // `overridden` IS overridden in Sub → should NOT be effectively final
+    val overriddenInfo = methodInfos.get(("overridden", "(I)I"))
+    assert(overriddenInfo.isDefined, s"overridden should be in InlineInfo: ${methodInfos.keys}")
+    assert(!overriddenInfo.get.effectivelyFinal, "overridden should NOT be effectively final (has override)")
+
+    assertEquals(runMain(survivors), "21")
   }
 
   // --- Method-level DCE tests ---
@@ -178,7 +221,8 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    // Disable closed-world: this test checks DCE behavior, not closed-world inlining
+    val survivors = compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = false))
     val helper = findClass(survivors, "Helper")
     val methodNames = helper.methods.asScala.map(_.name).toSet
     assert(methodNames.contains("used"), s"used should survive: $methodNames")
@@ -201,7 +245,8 @@ class IntegrationTest extends GoronTesting {
         |  }
         |}
       """.stripMargin
-    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    // Disable closed-world: this test checks DCE behavior, not closed-world inlining
+    val survivors = compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = false))
     val hello = findClass(survivors, "Hello")
     val methodNames = hello.methods.asScala.map(_.name).toSet
     assert(methodNames.contains("greet"), s"greet should survive: $methodNames")

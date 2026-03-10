@@ -7,6 +7,9 @@
 
 package goron
 
+import goron.optimizer.BTypes.{InlineInfo, MethodInlineInfo}
+import goron.optimizer.opt.InlineInfoAttribute
+
 import scala.collection.mutable
 import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes
@@ -105,16 +108,19 @@ object ClosedWorldAnalysis {
     }
   }
 
-  /** Apply closed-world knowledge to ClassNodes by updating InlineInfo. This marks effectively-final classes and
-    * methods so the inliner can be more aggressive.
+  /** Apply closed-world knowledge to ClassNodes by updating ACC_FINAL flags and ScalaInlineInfo attributes. This marks
+    * effectively-final classes and methods so the inliner can be more aggressive.
+    *
+    * ACC_FINAL is only set on leaf classes (setting it on non-leaf classes causes ClassFormatErrors). For the inliner,
+    * which uses ScalaInlineInfo.effectivelyFinal rather than ACC_FINAL, we update the InlineInfoAttribute directly on
+    * ALL classes. This allows the inliner to exploit effectively-final methods on non-leaf Scala classes.
     */
   def applyToClassNodes(classNodes: Iterable[ClassNode], hierarchy: ClosedWorldResult): Unit = {
-    // Only mark methods ACC_FINAL in classes that are themselves effectively final (leaf classes).
-    // Marking methods final in non-leaf classes can cause ClassFormatErrors when methods
-    // override abstract methods from interfaces/traits.
     for (cn <- classNodes) {
       val isLeafClass = hierarchy.effectivelyFinalClasses.contains(cn.name)
       val isInterface = (cn.access & Opcodes.ACC_INTERFACE) != 0
+
+      // ACC_FINAL: only on leaf, non-interface classes
       if (isLeafClass && !isFinalClass(cn) && !isInterface && cn.methods != null) {
         cn.methods.asScala.foreach { mn =>
           val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
@@ -126,6 +132,38 @@ object ClosedWorldAnalysis {
           }
         }
       }
+
+      // ScalaInlineInfo: update the attribute to reflect closed-world effectively-final knowledge.
+      // This is how the inliner learns about effectively-final methods on non-leaf classes.
+      updateInlineInfoAttribute(cn, hierarchy)
+    }
+  }
+
+  /** Update the ScalaInlineInfo attribute on a ClassNode to include closed-world effectively-final knowledge. If no
+    * attribute exists (non-Scala class), this is a no-op — the inliner will fall back to ACC_FINAL checks.
+    */
+  private def updateInlineInfoAttribute(cn: ClassNode, hierarchy: ClosedWorldResult): Unit = {
+    if (cn.attrs == null) return
+    val attrIndex = cn.attrs.asScala.indexWhere(_.isInstanceOf[InlineInfoAttribute])
+    if (attrIndex < 0) return
+
+    val existing = cn.attrs.get(attrIndex).asInstanceOf[InlineInfoAttribute].inlineInfo
+    val isClassFinal = existing.isEffectivelyFinal || hierarchy.effectivelyFinalClasses.contains(cn.name)
+
+    var changed = isClassFinal != existing.isEffectivelyFinal
+
+    val updatedMethodInfos = existing.methodInfos.map { case (key @ (name, desc), info) =>
+      if (!info.effectivelyFinal && hierarchy.effectivelyFinalMethods.contains((cn.name, name, desc))) {
+        changed = true
+        key -> info.copy(effectivelyFinal = true)
+      } else {
+        key -> info
+      }
+    }
+
+    if (changed) {
+      val updatedInfo = existing.copy(isEffectivelyFinal = isClassFinal, methodInfos = updatedMethodInfos)
+      cn.attrs.set(attrIndex, InlineInfoAttribute(updatedInfo))
     }
   }
 
