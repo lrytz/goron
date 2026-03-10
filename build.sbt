@@ -29,3 +29,18 @@ lazy val goron = (project in file("."))
       "-Wconf:msg=The outer reference in this type test cannot be checked at run time:s",
     ),
   )
+
+lazy val bench = (project in file("bench"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(goron)
+  .settings(
+    name := "goron-bench",
+    scalaVersion := "2.13.18",
+    // Don't publish benchmarks
+    publish / skip := true,
+    // JMH needs forked JVM for accurate measurements
+    Jmh / javaOptions ++= Seq("-Xmx4g", "-Xms4g"),
+    libraryDependencies ++= Seq(
+      "org.scala-lang" % "scala-compiler" % scalaVersion.value,
+    ),
+  )
