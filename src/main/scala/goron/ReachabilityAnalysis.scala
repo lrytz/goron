@@ -231,6 +231,11 @@ object ReachabilityAnalysis {
       enqueueClass(owner)
       if (isNew) {
         virtualCallCount += 1
+        // The JVM's INVOKEINTERFACE/INVOKEVIRTUAL symbolic resolution requires the method
+        // to exist on the declared owner (or its supertypes). Resolve from the owner upward
+        // to ensure the method is retained at the resolution target, not just on concrete
+        // dispatch targets which may be different classes.
+        resolveAndEnqueueMethod(owner, name, desc)
         // Resolve on already-instantiated subtypes
         for (inst <- instantiatedBySuper.getOrElse(owner, Nil))
           resolveAndEnqueueMethod(inst, name, desc)

@@ -74,6 +74,13 @@ Eliminated the quadratic RTA hotspot with three optimizations in `ClassHierarchy
 - Per-class `methodIndex: Map[(name, desc) → MethodNode]` for O(1) method lookup
   (was O(n) linear scan of `cn.methods` Java List)
 
+Also fixed a pre-existing bug: `enqueueVirtualCall` now also calls
+`resolveAndEnqueueMethod(owner, name, desc)` to retain the method at the JVM's symbolic
+resolution target (the declared owner or its supertypes), not just on concrete dispatch
+targets. Without this, INVOKEINTERFACE/INVOKEVIRTUAL resolution would fail with
+`NoSuchMethodError` when the method was defined on a trait/interface but stripped because
+the RTA analysis only kept it on the concrete mixin forwarder class.
+
 ### Parallelize local optimizations and serialization
 
 Per-class local optimizations and serialization have no shared mutable state and can run
