@@ -26,17 +26,11 @@ passed to `ReachabilityAnalysis` and `ClosedWorldAnalysis`. Eliminated the dupli
 subclass map construction that was in `methodLevelBFS` and `buildHierarchy`. The shared
 structure also provides a natural home for the supertype index needed to fix RTA performance.
 
-### Eliminate global mutable state in ReachabilityAnalysis
+### ~~Eliminate global mutable state in ReachabilityAnalysis~~ (done)
 
-`ReachabilityAnalysis` is a singleton `object` with a module-level mutable cache:
-
-```scala
-private val collectExternalClassMethodsCached = mutable.Map.empty[String, Set[(String, String)]]
-```
-
-This persists across calls. Currently safe because Goron runs once per JVM, but is a latent
-bug if the tool is used as a library, run in tests with different inputs, or parallelized.
-Move the cache into the BFS method scope or into an instance that is created per run.
+Moved `collectExternalClassMethodsCached` from module-level into `methodLevelBFS` scope,
+passed as a parameter to `collectExternalClassMethods`. Cache is now created fresh per
+analysis run, eliminating the latent stale-state bug.
 
 ### Connect closed-world analysis to the inliner
 

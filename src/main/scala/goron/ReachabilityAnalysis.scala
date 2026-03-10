@@ -92,8 +92,11 @@ object ReachabilityAnalysis {
   }
 
   /** Collect method signatures from an external class and its supertypes. */
-  private def collectExternalClassMethods(internalName: String): Set[(String, String)] = {
-    collectExternalClassMethodsCached.getOrElseUpdate(
+  private def collectExternalClassMethods(
+      internalName: String,
+      cache: mutable.Map[String, Set[(String, String)]]
+  ): Set[(String, String)] = {
+    cache.getOrElseUpdate(
       internalName, {
         try {
           val stream = Thread
@@ -133,15 +136,13 @@ object ReachabilityAnalysis {
             },
             asm.ClassReader.SKIP_CODE | asm.ClassReader.SKIP_DEBUG | asm.ClassReader.SKIP_FRAMES
           )
-          methods.toSet ++ superNames.flatMap(collectExternalClassMethods)
+          methods.toSet ++ superNames.flatMap(collectExternalClassMethods(_, cache))
         } catch {
           case _: Exception => Set.empty
         }
       }
     )
   }
-
-  private val collectExternalClassMethodsCached = mutable.Map.empty[String, Set[(String, String)]]
 
   // ---------------------------------------------------------------------------
   // Phase 1: Method-level BFS
@@ -238,6 +239,7 @@ object ReachabilityAnalysis {
     // Methods overriding external methods must be treated as reachable since external code
     // can call them (e.g. JDK calling abstract method implementations via virtual dispatch).
     val externalMethodsCache = mutable.Map.empty[String, Set[(String, String)]]
+    val externalClassMethodsCache = mutable.Map.empty[String, Set[(String, String)]]
     def externalMethods(className: String): Set[(String, String)] = {
       externalMethodsCache.getOrElseUpdate(
         className, {
@@ -249,7 +251,7 @@ object ReachabilityAnalysis {
                 else Set.empty[(String, String)]
               fromSuper ++ fromIfaces
             case None =>
-              collectExternalClassMethods(className)
+              collectExternalClassMethods(className, externalClassMethodsCache)
           }
         }
       )
