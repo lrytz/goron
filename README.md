@@ -1,10 +1,59 @@
 # Goron
 
-A link-time optimizer for Scala JVM bytecode.
+An experimental link-time optimizer for Scala JVM bytecode.
 
 Goron takes compiled Scala jars, applies whole-program analysis and optimization, and produces a single optimized jar.
 Think of it as a linker for the Scala JVM world.
-It eats through the rocks of dead code, devirtualizes method calls, and carves the input down to what your program actually needs.
+It eats through the rocks of dead code, devirtualizes method calls, and hones the code to make it run faster.
+
+## Project status and LLM disclaimer
+
+The current version of this codebase is heavily written by LLM coding assistants (except for the code copied from the Scala compiler).
+
+I (`@lrytz`) am the author of the optimizer in the Scala 2.13 backend, so I am familiar with the domain and the original source code, which was copied to this repo as a starting point.
+Creating a link-time optimizer for Scala JVM bytecode is an old idea ([scala-dev#396](https://github.com/scala/scala-dev/issues/396)), and Scala.js has had a link-time optimizer for a very long time with great success.
+There is currently work in progress to port the Scala 2.13 optimizer to Scala 3 ([scala3#25165](https://github.com/scala/scala3/pull/25165)).
+
+The reason this project exists now is that I picked it to learn about the capabilities of the new LLM coding agents.
+I only looked at the generated code superficially.
+Instead, I asked the agent to write tests, study code, implement ideas, fix bugs, improve performance etc.
+I did some manual end-to-end testing, mostly by processing the Scala compiler with the linker and running the result.
+I let the agent diagnose and fix it when it broke.
+
+```
+$ sbt assembly
+
+$ cd sandbox/
+
+$ java -jar ../target/scala-2.13/goron.jar \
+  $(cs fetch 'org.scala-lang:scala-compiler:2.13.18' | sed 's/^/--input /') \
+  --output scalac-optimized.jar \
+  --entry scala/tools/nsc/Main \
+  --entry scala/tools/nsc/reporters/ConsoleReporter \
+  --verbose
+Reading 5 input jar(s)...
+  8431 classes, 175 resources (0.3s)
+Parsing class files...
+  8431 classes parsed (0.4s)
+Reachability analysis...
+  5460 of 8431 classes reachable (0.9s)
+Closed-world analysis...
+  6361 final classes, 123866 final methods (0.3s)
+Inlining and closure optimization...
+  Done (13.1s)
+Local optimizations...
+  5483 classes optimized (37.8s)
+Dead code elimination...
+  4641 classes retained, 842 removed, 28410 methods stripped (0.5s)
+Serializing and writing output...
+  scalac-optimized.jar (1.5s)
+goron: 8431 → 4641 classes, 28410 methods stripped, 22.5M → 13.8M (55.1s)
+
+# compile using the optimized compiler
+$ java -cp scalac-optimized.jar scala.tools.nsc.Main \
+  -cp $(cs fetch -p org.scala-lang:scala-library:2.13.18) \
+  $(find ../scala/src/library -name '*.scala')
+```
 
 ## Motivation
 
@@ -15,7 +64,7 @@ It can inline methods from the module being compiled and its compile-time depend
 It cannot see the whole program, so it cannot determine which classes are actually used, which methods are never overridden, or which code paths are never reached.
 
 Also, inlining from libraries at compile-time creates a tight binary dependency between the generated code and the exact library versions used in compilation.
-This makes the optimizer unusable for libraries published to Maven Central, as applications will typically use different versions at runtime.
+This makes the optimizer unusable for libraries published to Maven Central, as applications will typically mix different versions at runtime.
 Therefore, typically only the application code is optimized, while external library code is not.
 
 Goron lifts the Scala optimizer to link time: it reads all the jars that make up a program, performs whole-program analysis, and then runs the optimization passes with more visibility.
@@ -37,7 +86,7 @@ Key changes to the forked code:
 
 The following components are new, they do not exist in the Scala compiler:
 
-- `ClassHierarchy.scala`: shared hierarchy with precomputed indices
+- `ClassHierarchy`: shared hierarchy with precomputed indices
 - `ReachabilityAnalysis`: Two-phase whole-program reachability (RTA)
 - `ClosedWorldAnalysis`: Effectively-final class/method analysis
 - `Goron`: Optimization pipeline orchestration
@@ -108,14 +157,14 @@ goron --input app.jar --input scala-library.jar --input scala-compiler.jar \
 
 Options:
 
-| Flag | Description |
-|------|-------------|
-| `--input <jar>` | Input jar (repeatable) |
-| `--output <jar>` | Output jar |
+| Flag              | Description                                            |
+|-------------------|--------------------------------------------------------|
+| `--input <jar>`   | Input jar (repeatable)                                 |
+| `--output <jar>`  | Output jar                                             |
 | `--entry <class>` | Entry point class in internal name format (repeatable) |
-| `--no-inline` | Disable inlining and closure optimization |
-| `--no-dce` | Disable dead code elimination |
-| `--verbose` | Show per-phase timing and statistics |
+| `--no-inline`     | Disable inlining and closure optimization              |
+| `--no-dce`        | Disable dead code elimination                          |
+| `--verbose`       | Show per-phase timing and statistics                   |
 
 Build with sbt:
 
