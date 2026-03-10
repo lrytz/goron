@@ -40,10 +40,9 @@ object ReachabilityAnalysis {
     */
   def reachableClasses(
       hierarchy: ClassHierarchy,
-      entryPoints: Set[String],
-      progressCallback: String => Unit = _ => ()
+      entryPoints: Set[String]
   ): Set[String] = {
-    val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints, progressCallback)
+    val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints)
     loadClosure(execReachable, reachableMethods, hierarchy.classByName, willStripMethods = false)
   }
 
@@ -55,10 +54,9 @@ object ReachabilityAnalysis {
     */
   def reachableClassesAndMethods(
       hierarchy: ClassHierarchy,
-      entryPoints: Set[String],
-      progressCallback: String => Unit = _ => ()
+      entryPoints: Set[String]
   ): (Set[String], Set[String], Set[(String, String, String)]) = {
-    val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints, progressCallback)
+    val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints)
     val allReachable = loadClosure(execReachable, reachableMethods, hierarchy.classByName, willStripMethods = true)
     (allReachable, execReachable, reachableMethods)
   }
@@ -150,8 +148,7 @@ object ReachabilityAnalysis {
 
   private def methodLevelBFS(
       hierarchy: ClassHierarchy,
-      entryPoints: Set[String],
-      progressCallback: String => Unit
+      entryPoints: Set[String]
   ): (Set[String], Set[(String, String, String)]) = {
     val classByName = hierarchy.classByName
 
@@ -271,24 +268,6 @@ object ReachabilityAnalysis {
         cn.methods.asScala.foreach(mn => enqueueMethod(ep, mn.name, mn.desc))
     }
 
-    // Progress reporting
-    var lastProgressTime = System.nanoTime()
-    val progressIntervalNs = 5L * 1000000000L // 5 seconds
-    var methodsProcessed = 0
-
-    def reportProgress(): Unit = {
-      val now = System.nanoTime()
-      if (now - lastProgressTime >= progressIntervalNs) {
-        progressCallback(
-          s"  ${reachableClasses.size} classes, ${reachableMethods.size} methods reachable" +
-            s", ${methodsProcessed} methods scanned" +
-            s", $virtualCallCount virtual call sites" +
-            s", ${instantiatedClasses.size} instantiated types"
-        )
-        lastProgressTime = now
-      }
-    }
-
     // Main BFS loop
     while (classWorklist.nonEmpty || methodWorklist.nonEmpty) {
       while (classWorklist.nonEmpty) {
@@ -325,8 +304,6 @@ object ReachabilityAnalysis {
         val (className, methodName, methodDesc) = methodWorklist.dequeue()
         for (mn <- hierarchy.lookupMethod(className, methodName, methodDesc))
           processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall, markInstantiated)
-        methodsProcessed += 1
-        reportProgress()
       }
     }
 

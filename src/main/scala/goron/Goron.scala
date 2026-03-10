@@ -58,12 +58,10 @@ object Goron {
     // Determine reachable classes first — only these will be optimized.
     // All classes are added to ByteCodeRepository for type resolution, but only
     // reachable classes are added as "compiling" (eligible for inlining into).
-    val progressLog: String => Unit = msg => log(msg)
-
     val reachableNames = if (config.entryPoints.nonEmpty) {
       log("Reachability analysis...")
       phaseStart = System.nanoTime()
-      val reachable = ReachabilityAnalysis.reachableClasses(hierarchy, config.entryPoints.toSet, progressLog)
+      val reachable = ReachabilityAnalysis.reachableClasses(hierarchy, config.entryPoints.toSet)
       log(s"  ${reachable.size} of ${classNodes.size} classes reachable (${elapsed(phaseStart)})")
       reachable
     } else {
@@ -117,7 +115,7 @@ object Goron {
       phaseStart = System.nanoTime()
       val dceHierarchy = ClassHierarchy.build(reachableClassNodes)
       val (reachable, execReachable, reachableMethods) =
-        ReachabilityAnalysis.reachableClassesAndMethods(dceHierarchy, config.entryPoints.toSet, progressLog)
+        ReachabilityAnalysis.reachableClassesAndMethods(dceHierarchy, config.entryPoints.toSet)
       val surviving = reachableClassNodes.filter(cn => reachable.contains(cn.name))
       strippedMethods = ReachabilityAnalysis.stripUnreachableMethods(surviving, reachableMethods, execReachable)
       val removedClasses = reachableClassNodes.size - surviving.size
