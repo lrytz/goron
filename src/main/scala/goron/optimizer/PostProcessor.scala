@@ -17,21 +17,20 @@ import scala.tools.asm.tree.ClassNode
 /** Implements optimizations, post-processing, and classfile serialization.
   */
 final class PostProcessor(val bTypes: BTypes) {
-  self =>
 
   import bTypes._
 
   def compilerSettings: CompilerSettings = bTypes.compilerSettings
   def backendReporting: BackendReporting.Reporter = bTypes.backendReporting
 
-  lazy val backendUtils = BackendUtils(self)
-  lazy val byteCodeRepository = ByteCodeRepository(self)
-  lazy val localOpt = LocalOpt(self)
-  lazy val inliner = Inliner(self)
-  lazy val inlinerHeuristics = InlinerHeuristics(self)
-  lazy val closureOptimizer = ClosureOptimizer(self)
-  lazy val callGraph = CallGraph(self)
-  lazy val bTypesFromClassfile = BTypesFromClassfile(self)
+  lazy val backendUtils = new BackendUtils[this.type](this)
+  lazy val byteCodeRepository = new ByteCodeRepository[this.type](this)
+  lazy val localOpt = new LocalOpt[this.type](this)
+  lazy val inliner = new Inliner[this.type](this)
+  lazy val inlinerHeuristics = new InlinerHeuristics[this.type](this)
+  lazy val closureOptimizer = new ClosureOptimizer[this.type](this)
+  lazy val callGraph = new CallGraph[this.type](this)
+  lazy val bTypesFromClassfile = new BTypesFromClassfile[this.type](this)
 
   /** Run global optimizations: build call graph, inline, optimize closures. Called by goron after all classes have been
     * added to the ByteCodeRepository.

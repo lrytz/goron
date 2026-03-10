@@ -22,8 +22,7 @@ import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
 
-abstract class ClosureOptimizer {
-  val postProcessor: PostProcessor
+class ClosureOptimizer[PP <: PostProcessor](val postProcessor: PP) {
 
   import postProcessor._
   import bTypes._
@@ -563,8 +562,6 @@ abstract class ClosureOptimizer {
 }
 
 object ClosureOptimizer {
-  def apply(pp: PostProcessor): ClosureOptimizer { val postProcessor: pp.type } =
-    new ClosureOptimizer { val postProcessor: pp.type = pp }
 
   val primitives = "BSIJCFDZV"
   val specializationSuffix = s"(\\$$mc[$primitives]+\\$$sp)".r

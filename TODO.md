@@ -13,11 +13,11 @@
 
 ### ~~Replace cake pattern with plain constructor injection~~ (done)
 
-Simplified via companion-object factory methods (`Inliner(pp)`, `CallGraph(pp)`, etc.).
-Modules remain abstract classes because `BTypes` uses path-dependent types (`ClassBType`
-etc.) that require `self.type` refinements to prove all modules share the same `BTypes`
-instance. The abstract class + refined `val postProcessor` pattern is the idiomatic Scala 2
-mechanism for this. Factory methods hide the anonymous-subclass boilerplate.
+Replaced abstract classes + anonymous subclass wiring with concrete generic classes:
+`class CallGraph[PP <: PostProcessor](val postProcessor: PP)`. PostProcessor instantiates
+with `this.type`: `new CallGraph[this.type](this)`. The type parameter carries the singleton
+type through, so the compiler can prove all modules share the same `BTypes` instance without
+`self.type` refinement types or abstract vals.
 
 ### Unify class hierarchy into a shared data structure
 

@@ -28,8 +28,7 @@ import scala.util.control.{NoStackTrace, NonFatal}
   *
   * TODO: move out of `analysis` package?
   */
-abstract class BackendUtils {
-  val postProcessor: PostProcessor
+class BackendUtils[PP <: PostProcessor](val postProcessor: PP) {
 
   import postProcessor.{bTypes, bTypesFromClassfile, callGraph}
   import bTypes._
@@ -523,9 +522,6 @@ abstract class BackendUtils {
 }
 
 object BackendUtils {
-  def apply(pp: PostProcessor): BackendUtils { val postProcessor: pp.type } =
-    new BackendUtils { val postProcessor: pp.type = pp }
-
 
   /** A pseudo-flag, added MethodNodes whose maxLocals / maxStack are computed. This allows invoking
     * `computeMaxLocalsMaxStack` whenever running an analyzer but performing the actual computation only when necessary.

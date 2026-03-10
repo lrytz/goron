@@ -19,13 +19,7 @@ import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
 
-object BoxUnbox {
-  def apply(pp: PostProcessor): BoxUnbox { val postProcessor: pp.type } =
-    new BoxUnbox { val postProcessor: pp.type = pp }
-}
-
-abstract class BoxUnbox {
-  val postProcessor: PostProcessor
+class BoxUnbox[PP <: PostProcessor](val postProcessor: PP) {
 
   import postProcessor.{backendUtils, callGraph}
   import backendUtils._
