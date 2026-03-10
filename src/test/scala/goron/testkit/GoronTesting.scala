@@ -424,22 +424,25 @@ object GoronTesting {
     new java.io.File(jarUrl.toURI).getAbsolutePath
   }
 
-  /** Cached scala-library ClassNodes. Parsed once per JVM. */
-  lazy val scalaLibraryNodes: List[ClassNode] = {
+  /** Cached scala-library jar bytes. Parsed once per JVM, but ClassNodes are created fresh
+    * each call to avoid shared mutable state between tests (closed-world analysis mutates ClassNodes).
+    */
+  private lazy val scalaLibraryEntries: List[JarIO.JarEntry] = {
     val jarPath = findScalaLibraryJar()
-    val entries = JarIO.readJar(jarPath)
-    entries
-      .filter(_.isClass)
-      .map { entry =>
-        val cn = new ClassNode1()
-        new asm.ClassReader(entry.bytes).accept(
-          cn,
-          Array[asm.Attribute](InlineInfoAttributePrototype),
-          asm.ClassReader.SKIP_FRAMES
-        )
-        cn
-      }
-      .toList
+    JarIO.readJar(jarPath).filter(_.isClass).toList
+  }
+
+  /** Fresh scala-library ClassNodes. Each call returns new ClassNode instances. */
+  def scalaLibraryNodes: List[ClassNode] = {
+    scalaLibraryEntries.map { entry =>
+      val cn = new ClassNode1()
+      new asm.ClassReader(entry.bytes).accept(
+        cn,
+        Array[asm.Attribute](InlineInfoAttributePrototype),
+        asm.ClassReader.SKIP_FRAMES
+      )
+      cn
+    }
   }
 
   def newScalac(extraArgs: String = ""): ScalacCompiler = {
