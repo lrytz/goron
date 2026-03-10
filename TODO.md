@@ -93,6 +93,20 @@ Record edges during reachability analysis: which method/class caused each method
 be enqueued, track virtual call resolution chains. Enables debugging why specific classes
 survive DCE.
 
+### Inline virtual calls with known exact type
+
+When the receiver type is known precisely, virtual calls can be inlined even if
+the method is overridden in subclasses. For example, in `new Foo().bar()` the
+receiver is exactly `Foo`, so `bar` can be resolved and inlined without requiring
+it to be effectively final. This applies after constructor calls, after
+`checkcast`, and potentially after type flow analysis determines a local always
+holds a specific type.
+
+The compiler's `CallGraph` already has a TODO for this (`"type analysis can
+render more calls statically resolved"`). Currently `isStaticallyResolved` only
+checks if the method or the receiver's declared class is effectively final, not
+the actual type at the callsite.
+
 ### Generalized stack allocation / scalar replacement
 
 The existing `BoxUnbox` pass eliminates allocations of primitive boxes, `Ref` classes, and
