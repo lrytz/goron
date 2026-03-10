@@ -93,6 +93,45 @@ Record edges during reachability analysis: which method/class caused each method
 be enqueued, track virtual call resolution chains. Enables debugging why specific classes
 survive DCE.
 
+### Generalized stack allocation / scalar replacement
+
+The existing `BoxUnbox` pass eliminates allocations of primitive boxes, `Ref` classes, and
+`Tuple1`–`Tuple22` by replacing them with local variables. It uses producer-consumer analysis
+as escape analysis: if no consumer of a `NEW` escapes, field accesses become local loads/stores.
+
+This could be generalized to eliminate allocations of **any** immutable class whose instance
+doesn't escape, without hardcoding types. Concrete candidates:
+
+- **Option/Some**: After inlining `getOrElse`, `map`, `fold`, etc., the pattern
+  `new Some(x)` → `_.get` is a classic box-unbox. Consumers: `.get`, `._1`,
+  `.isEmpty` (constant `false`). Immutable, single field — fits the existing M1/M2 framework.
+- **Right/Left**: Similar single-field immutable wrappers.
+- **Range**: After inlining `foreach` + closure elimination, what remains is field accesses
+  (`start`, `end`, `step`) and methods like `isEmpty`. Three immutable fields — if all methods
+  are inlined, the allocation can be replaced with three locals. Alternatively, a semantic
+  rewrite (pattern-match the `Range.foreach` loop and lower to a while loop) may be more
+  robust than relying on enough inlining to expose all field accesses.
+- **Value classes**: Single-field wrappers with predictable constructor/accessor patterns.
+  There's an existing `// TODO: add more` + commented-out `ValueClass` in BoxUnbox.
+
+**Two possible approaches:**
+1. *Extend BoxUnbox* with more `BoxKind` entries for specific types (Some, Range, etc.).
+   Incremental, fits existing architecture, but remains a hardcoded list.
+2. *General escape-analysis pass* that works on any `NEW` + `<init>` where the object
+   doesn't escape. After inlining turns method calls into field accesses, replace
+   GETFIELD/PUTFIELD with local variables. Subsumes all individual BoxKind entries.
+   Harder on stack-based bytecode than on AST-level IR (cf. Scala.js `InlineClassInstanceReplacement`
+   which does this on AST IR with an explicit "inlineable class" optimizer hint set by the
+   compiler plugin — but only for Tuples and ArrayOps in practice).
+
+### Dead field elimination
+
+After closed-world analysis, inlining, and DCE, some fields may become write-only (assigned
+in constructors or methods, but never read). Eliminating the field and the write instructions
+would shrink objects and reduce initialization cost. Requires a whole-program analysis: scan
+all retained methods for GETFIELD/GETSTATIC instructions, then strip fields (and their
+writes) that have no readers.
+
 ### ~~Add JMH benchmark subproject~~ (done)
 
 `bench/` subproject with sbt-jmh. `ScalacBenchmark` compares stock vs goron-optimized
