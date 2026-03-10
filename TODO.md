@@ -101,3 +101,10 @@ module-aware visibility checks for Java dependencies.
 Record edges during reachability analysis: which method/class caused each method/class to
 be enqueued, track virtual call resolution chains. Enables debugging why specific classes
 survive DCE.
+
+### Add JMH benchmark subproject
+
+Add an sbt subproject with JMH benchmarks. The primary benchmark should compare Scala
+compiler performance: the official scala-compiler 2.13.18 release vs 2.13.18 optimized
+with goron. This provides a concrete, reproducible metric for measuring goron's impact on
+real-world Scala code.
