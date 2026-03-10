@@ -44,7 +44,7 @@ object ReachabilityAnalysis {
       progressCallback: String => Unit = _ => ()
   ): Set[String] = {
     val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints, progressCallback)
-    loadClosure(execReachable, reachableMethods, hierarchy.classByName)
+    loadClosure(execReachable, reachableMethods, hierarchy.classByName, willStripMethods = false)
   }
 
   /** Like `reachableClasses`, but also returns the set of reachable methods and the execution-reachable class set
@@ -59,7 +59,7 @@ object ReachabilityAnalysis {
       progressCallback: String => Unit = _ => ()
   ): (Set[String], Set[String], Set[(String, String, String)]) = {
     val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints, progressCallback)
-    val allReachable = loadClosure(execReachable, reachableMethods, hierarchy.classByName)
+    val allReachable = loadClosure(execReachable, reachableMethods, hierarchy.classByName, willStripMethods = true)
     (allReachable, execReachable, reachableMethods)
   }
 
@@ -341,20 +341,23 @@ object ReachabilityAnalysis {
     * needed for JVM class loading/verification. For load-reachable classes, we follow their type hierarchy and
     * descriptor types but NOT their method bodies.
     */
+  /** @param willStripMethods
+    *   if true, only methods that survive stripping are scanned; if false, all methods are scanned
+    */
   private def loadClosure(
       execReachable: Set[String],
       reachableMethods: Set[(String, String, String)],
-      classByName: Map[String, ClassNode]
+      classByName: Map[String, ClassNode],
+      willStripMethods: Boolean
   ): Set[String] = {
     val allReachable = mutable.Set.empty[String]
     allReachable ++= execReachable
 
     val worklist = mutable.Queue.empty[String]
 
-    // Seed: collect class references from execution-reachable classes,
-    // but only scan methods that are reachable (unreachable methods will be stripped)
+    val retainedMethods = if (willStripMethods) Some(reachableMethods) else None
     for (name <- execReachable; cn <- classByName.get(name))
-      collectAllClassRefs(cn, reachableMethods, allReachable, worklist, classByName)
+      collectAllClassRefs(cn, retainedMethods, allReachable, worklist, classByName)
 
     // Transitively close: load-reachable classes need their supertypes,
     // field types, and method descriptor types to also be loadable
@@ -367,13 +370,13 @@ object ReachabilityAnalysis {
     allReachable.toSet
   }
 
-  /** Collect class references from a ClassNode needed for JVM loading. For execution-reachable classes, we only need
-    * supertypes to be present — field types, method descriptors, and instruction references are verified lazily by the
-    * JVM when actually accessed.
+  /** Collect class references from a ClassNode needed for JVM class loading and verification. The JVM verifier
+    * resolves ALL methods of a class when it is first loaded (not lazily), so types in StackMapTable frames, method
+    * descriptors, and exception tables must be present for all methods that survive stripping.
     */
   private def collectAllClassRefs(
       cn: ClassNode,
-      reachableMethods: Set[(String, String, String)],
+      retainedMethods: Option[Set[(String, String, String)]],
       reachable: mutable.Set[String],
       worklist: mutable.Queue[String],
       classByName: Map[String, ClassNode]
@@ -385,13 +388,12 @@ object ReachabilityAnalysis {
       }
     }
 
-    // Only supertypes are eagerly verified by the JVM during class loading
-    if (cn.superName != null) enqueue(cn.superName)
-    if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
+    collectClassStructureRefs(cn, enqueue, retainedMethods)
   }
 
-  /** Collect class references that are needed for a class to be LOADABLE (not executable). Only supertypes are eagerly
-    * required by the JVM.
+  /** Collect class references needed for a class to be LOADABLE. Includes supertypes, method/field descriptors,
+    * and all types referenced in method bodies (stack map frames, instructions, exception tables) since the JVM
+    * verifier resolves these eagerly at class load time.
     */
   private def collectLoadDeps(
       cn: ClassNode,
@@ -406,8 +408,98 @@ object ReachabilityAnalysis {
       }
     }
 
+    collectClassStructureRefs(cn, enqueue, None)
+  }
+
+  /** Collect all class references from a ClassNode's structure: supertypes, field/method descriptors, and all
+    * types in method bodies that the JVM verifier may resolve during class loading.
+    *
+    * @param retainedMethods
+    *   if Some, only scan methods that will survive stripping (reachable + abstract/native/bridge). If None, scan
+    *   all methods (for load-only classes where no stripping occurs).
+    */
+  private def collectClassStructureRefs(
+      cn: ClassNode,
+      enqueue: String => Unit,
+      retainedMethods: Option[Set[(String, String, String)]]
+  ): Unit = {
+    // Supertypes are eagerly resolved during class loading
     if (cn.superName != null) enqueue(cn.superName)
     if (cn.interfaces != null) cn.interfaces.asScala.foreach(enqueue)
+
+    // Field descriptors
+    if (cn.fields != null)
+      cn.fields.asScala.foreach(fn => addTypeDescClassRefs(fn.desc, enqueue))
+
+    // Scan methods that will be in the output class: the JVM verifier resolves types
+    // in StackMapTable frames, method descriptors, exception tables, and instructions
+    if (cn.methods != null) {
+      cn.methods.asScala.foreach { mn =>
+        val shouldScan = retainedMethods match {
+          case None => true
+          case Some(reachable) =>
+            val isAbstract = (mn.access & Opcodes.ACC_ABSTRACT) != 0
+            val isNative = (mn.access & Opcodes.ACC_NATIVE) != 0
+            val isBridge = (mn.access & Opcodes.ACC_BRIDGE) != 0
+            isAbstract || isNative || isBridge || reachable.contains((cn.name, mn.name, mn.desc))
+        }
+        if (shouldScan) {
+          addMethodDescClassRefs(mn.desc, enqueue)
+
+          if (mn.tryCatchBlocks != null)
+            mn.tryCatchBlocks.asScala.foreach(tcb => if (tcb.`type` != null) enqueue(tcb.`type`))
+
+          if (mn.instructions != null) {
+            val iter = mn.instructions.iterator()
+            while (iter.hasNext) {
+              iter.next() match {
+                case ti: TypeInsnNode =>
+                  addInternalOrArrayClassRef(ti.desc, enqueue)
+                case mi: MethodInsnNode =>
+                  enqueue(mi.owner)
+                  addMethodDescClassRefs(mi.desc, enqueue)
+                case fi: FieldInsnNode =>
+                  enqueue(fi.owner)
+                  addTypeDescClassRefs(fi.desc, enqueue)
+                case inv: InvokeDynamicInsnNode =>
+                  addMethodDescClassRefs(inv.desc, enqueue)
+                  if (inv.bsmArgs != null) {
+                    for (arg <- inv.bsmArgs) arg match {
+                      case t: Type =>
+                        if (t.getSort == Type.OBJECT) enqueue(t.getInternalName)
+                        else if (t.getSort == Type.METHOD) addMethodDescClassRefs(t.getDescriptor, enqueue)
+                      case h: Handle =>
+                        enqueue(h.getOwner)
+                        addMethodDescClassRefs(h.getDesc, enqueue)
+                      case _ =>
+                    }
+                  }
+                case mri: MultiANewArrayInsnNode =>
+                  addTypeDescClassRefs(mri.desc, enqueue)
+                case ldc: LdcInsnNode =>
+                  ldc.cst match {
+                    case t: Type =>
+                      if (t.getSort == Type.OBJECT) enqueue(t.getInternalName)
+                      else if (t.getSort == Type.ARRAY) addTypeDescClassRefs(t.getDescriptor, enqueue)
+                      else if (t.getSort == Type.METHOD) addMethodDescClassRefs(t.getDescriptor, enqueue)
+                    case h: Handle =>
+                      enqueue(h.getOwner)
+                      addMethodDescClassRefs(h.getDesc, enqueue)
+                    case _ =>
+                  }
+                case fn: FrameNode =>
+                  // StackMapTable frames: the verifier resolves object types in locals and stack
+                  if (fn.local != null)
+                    fn.local.asScala.foreach { case s: String => enqueue(s); case _ => }
+                  if (fn.stack != null)
+                    fn.stack.asScala.foreach { case s: String => enqueue(s); case _ => }
+                case _ =>
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -477,6 +569,16 @@ object ReachabilityAnalysis {
                   resolveAndEnqueueMethod(h.getOwner, h.getName, h.getDesc)
                 case _ =>
               }
+            }
+            // LambdaMetafactory creates synthetic classes at runtime that implement the
+            // functional interface (the INVOKEDYNAMIC return type). These classes inherit
+            // default bridge methods (e.g., JFunction0$mcI$sp.apply()Object bridges to
+            // apply$mcI$sp()I). Mark the functional interface as instantiated so virtual
+            // call resolution retains those default methods.
+            if (inv.bsm != null && inv.bsm.getOwner == "java/lang/invoke/LambdaMetafactory") {
+              val retType = Type.getReturnType(inv.desc)
+              if (retType.getSort == Type.OBJECT)
+                markInstantiated(retType.getInternalName)
             }
           case _ =>
         }
