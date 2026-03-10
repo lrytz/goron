@@ -16,8 +16,13 @@ import scala.tools.asm.tree.ClassNode
 
 /** Implements optimizations, post-processing, and classfile serialization.
   */
-final class PostProcessor(val bTypes: BTypes) {
+final class PostProcessor(
+    settings: CompilerSettings,
+    classpath: goron.Classpath,
+    reporter: BackendReporting.Reporter
+) {
 
+  val bTypes: BTypes = new BTypes(settings, classpath, reporter)
   import bTypes._
 
   def compilerSettings: CompilerSettings = bTypes.compilerSettings

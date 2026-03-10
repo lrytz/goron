@@ -37,7 +37,7 @@ object Goron {
     val reporter =
       if (config.verbose) BackendReporting.ConsoleReporter
       else BackendReporting.SilentReporter
-    val pp = createPostProcessor(settings, classpath, reporter)
+    val pp = new PostProcessor(settings, classpath, reporter)
 
     // Parse all class entries into ClassNodes (using ClassNode1 for LabelNode1 support)
     log("Parsing class files...")
@@ -151,15 +151,5 @@ object Goron {
     if (bytes < 1024) s"${bytes}B"
     else if (bytes < 1024 * 1024) f"${bytes / 1024.0}%.0fK"
     else f"${bytes / (1024.0 * 1024.0)}%.1fM"
-  }
-
-  /** Create a fully wired PostProcessor with the cake pattern. */
-  private def createPostProcessor(
-      settings: CompilerSettings,
-      cp: Classpath,
-      reporter: BackendReporting.Reporter
-  ): PostProcessor = {
-    val bTypes: BTypes = new BTypes(settings, cp, reporter)
-    new PostProcessor(bTypes)
   }
 }

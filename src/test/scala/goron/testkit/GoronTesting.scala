@@ -481,7 +481,6 @@ object GoronTesting {
     val settings = CompilerSettings.fromConfig(config)
     val reporter = BackendReporting.SilentReporter
 
-    val bTypes: BTypes = new BTypes(settings, cp, reporter)
-    new PostProcessor(bTypes)
+    new PostProcessor(settings, cp, reporter)
   }
 }
