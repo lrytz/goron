@@ -284,11 +284,12 @@ class GoronTest extends munit.FunSuite {
     val leafCn = new scala.tools.asm.tree.ClassNode()
     new ClassReader(leafBytes).accept(leafCn, 0)
 
-    val hierarchy = ClosedWorldAnalysis.buildHierarchy(Seq(baseCn, leafCn))
+    val hierarchy = ClassHierarchy.build(Seq(baseCn, leafCn))
+    val closedWorld = ClosedWorldAnalysis.buildHierarchy(hierarchy)
 
-    assert(hierarchy.effectivelyFinalClasses.contains("com/example/Leaf"))
-    assert(!hierarchy.effectivelyFinalClasses.contains("com/example/Base"))
-    assert(hierarchy.effectivelyFinalMethods.contains(("com/example/Leaf", "greet", "()I")))
-    assert(!hierarchy.effectivelyFinalMethods.contains(("com/example/Base", "greet", "()I")))
+    assert(closedWorld.effectivelyFinalClasses.contains("com/example/Leaf"))
+    assert(!closedWorld.effectivelyFinalClasses.contains("com/example/Base"))
+    assert(closedWorld.effectivelyFinalMethods.contains(("com/example/Leaf", "greet", "()I")))
+    assert(!closedWorld.effectivelyFinalMethods.contains(("com/example/Base", "greet", "()I")))
   }
 }

@@ -243,7 +243,8 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     val allNodes = userNodes ++ libNodes
 
     // First reachability pass
-    val reachableNames = ReachabilityAnalysis.reachableClasses(allNodes, entryPoints)
+    val allHierarchy = ClassHierarchy.build(allNodes)
+    val reachableNames = ReachabilityAnalysis.reachableClasses(allHierarchy, entryPoints)
     val reachableNodes = allNodes.filter(cn => reachableNames.contains(cn.name))
     val unreachableNodes = allNodes.filterNot(cn => reachableNames.contains(cn.name))
 
@@ -255,8 +256,8 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
 
     // Closed-world analysis (matches Goron.run ordering)
     if (config.closedWorld) {
-      val hierarchy = ClosedWorldAnalysis.buildHierarchy(allNodes)
-      ClosedWorldAnalysis.applyToClassNodes(reachableNodes, hierarchy)
+      val closedWorld = ClosedWorldAnalysis.buildHierarchy(allHierarchy)
+      ClosedWorldAnalysis.applyToClassNodes(reachableNodes, closedWorld)
     }
 
     // Global optimizations
@@ -270,7 +271,7 @@ trait GoronIntegrationHelpers { self: GoronTesting =>
     // Second DCE pass + method stripping
     if (config.eliminateDeadCode && entryPoints.nonEmpty) {
       val (reachable2, execReachable2, reachableMethods2) =
-        ReachabilityAnalysis.reachableClassesAndMethods(reachableNodes, entryPoints)
+        ReachabilityAnalysis.reachableClassesAndMethods(ClassHierarchy.build(reachableNodes), entryPoints)
       val surviving = reachableNodes.filter(cn => reachable2.contains(cn.name))
       ReachabilityAnalysis.stripUnreachableMethods(surviving, reachableMethods2, execReachable2)
       surviving

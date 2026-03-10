@@ -39,13 +39,12 @@ object ReachabilityAnalysis {
     *   set of reachable class internal names
     */
   def reachableClasses(
-      classNodes: Iterable[ClassNode],
+      hierarchy: ClassHierarchy,
       entryPoints: Set[String],
       progressCallback: String => Unit = _ => ()
   ): Set[String] = {
-    val classByName = classNodes.map(cn => cn.name -> cn).toMap
-    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints, progressCallback)
-    loadClosure(execReachable, reachableMethods, classByName)
+    val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints, progressCallback)
+    loadClosure(execReachable, reachableMethods, hierarchy.classByName)
   }
 
   /** Like `reachableClasses`, but also returns the set of reachable methods and the execution-reachable class set
@@ -55,13 +54,12 @@ object ReachabilityAnalysis {
     *   (allReachableClasses, execReachableClasses, reachableMethods)
     */
   def reachableClassesAndMethods(
-      classNodes: Iterable[ClassNode],
+      hierarchy: ClassHierarchy,
       entryPoints: Set[String],
       progressCallback: String => Unit = _ => ()
   ): (Set[String], Set[String], Set[(String, String, String)]) = {
-    val classByName = classNodes.map(cn => cn.name -> cn).toMap
-    val (execReachable, reachableMethods) = methodLevelBFS(classByName, entryPoints, progressCallback)
-    val allReachable = loadClosure(execReachable, reachableMethods, classByName)
+    val (execReachable, reachableMethods) = methodLevelBFS(hierarchy, entryPoints, progressCallback)
+    val allReachable = loadClosure(execReachable, reachableMethods, hierarchy.classByName)
     (allReachable, execReachable, reachableMethods)
   }
 
@@ -150,18 +148,11 @@ object ReachabilityAnalysis {
   // ---------------------------------------------------------------------------
 
   private def methodLevelBFS(
-      classByName: Map[String, ClassNode],
+      hierarchy: ClassHierarchy,
       entryPoints: Set[String],
       progressCallback: String => Unit
   ): (Set[String], Set[(String, String, String)]) = {
-    // Build subclass map for virtual dispatch resolution
-    val subclasses = mutable.Map.empty[String, mutable.Set[String]]
-    for ((_, cn) <- classByName) {
-      if (cn.superName != null)
-        subclasses.getOrElseUpdate(cn.superName, mutable.Set.empty) += cn.name
-      if (cn.interfaces != null)
-        cn.interfaces.asScala.foreach(iface => subclasses.getOrElseUpdate(iface, mutable.Set.empty) += cn.name)
-    }
+    val classByName = hierarchy.classByName
 
     val reachableClasses = mutable.Set.empty[String]
     val reachableMethods = mutable.Set.empty[(String, String, String)]

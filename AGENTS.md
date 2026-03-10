@@ -71,10 +71,13 @@ Tests use munit. The `GoronTesting` trait provides:
 
 `GoronTesting.scalaLibraryNodes` is a lazy val that parses scala-library once per JVM for integration test performance.
 
-## Workflow — IMPORTANT
+## Workflow
 
-- **ALWAYS commit after completing a task. Every task ends with a commit. No exceptions.** Do not wait for the user to ask — committing is the final step of every task.
 - Check `TODO.md` for pending work items.
+
+### MANDATORY: Commit after every task
+
+Every completed task MUST end with a git commit. This is not optional.
 
 ## Known Limitations
 

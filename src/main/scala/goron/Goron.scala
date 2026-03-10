@@ -52,6 +52,9 @@ object Goron {
 
     log(s"  ${classNodes.size} classes parsed (${elapsed(phaseStart)})")
 
+    // Build shared class hierarchy once for use across analyses
+    val hierarchy = ClassHierarchy.build(classNodes)
+
     // Determine reachable classes first — only these will be optimized.
     // All classes are added to ByteCodeRepository for type resolution, but only
     // reachable classes are added as "compiling" (eligible for inlining into).
@@ -60,7 +63,7 @@ object Goron {
     val reachableNames = if (config.entryPoints.nonEmpty) {
       log("Reachability analysis...")
       phaseStart = System.nanoTime()
-      val reachable = ReachabilityAnalysis.reachableClasses(classNodes, config.entryPoints.toSet, progressLog)
+      val reachable = ReachabilityAnalysis.reachableClasses(hierarchy, config.entryPoints.toSet, progressLog)
       log(s"  ${reachable.size} of ${classNodes.size} classes reachable (${elapsed(phaseStart)})")
       reachable
     } else {
@@ -82,11 +85,11 @@ object Goron {
     if (config.closedWorld) {
       log("Closed-world analysis...")
       phaseStart = System.nanoTime()
-      val hierarchy = ClosedWorldAnalysis.buildHierarchy(classNodes)
-      ClosedWorldAnalysis.applyToClassNodes(reachableClassNodes, hierarchy)
+      val closedWorld = ClosedWorldAnalysis.buildHierarchy(hierarchy)
+      ClosedWorldAnalysis.applyToClassNodes(reachableClassNodes, closedWorld)
       log(
-        s"  ${hierarchy.effectivelyFinalClasses.size} final classes, " +
-          s"${hierarchy.effectivelyFinalMethods.size} final methods (${elapsed(phaseStart)})"
+        s"  ${closedWorld.effectivelyFinalClasses.size} final classes, " +
+          s"${closedWorld.effectivelyFinalMethods.size} final methods (${elapsed(phaseStart)})"
       )
     }
 
@@ -112,8 +115,9 @@ object Goron {
     val outputClassNodes = if (config.eliminateDeadCode && config.entryPoints.nonEmpty) {
       log("Dead code elimination...")
       phaseStart = System.nanoTime()
+      val dceHierarchy = ClassHierarchy.build(reachableClassNodes)
       val (reachable, execReachable, reachableMethods) =
-        ReachabilityAnalysis.reachableClassesAndMethods(reachableClassNodes, config.entryPoints.toSet, progressLog)
+        ReachabilityAnalysis.reachableClassesAndMethods(dceHierarchy, config.entryPoints.toSet, progressLog)
       val surviving = reachableClassNodes.filter(cn => reachable.contains(cn.name))
       strippedMethods = ReachabilityAnalysis.stripUnreachableMethods(surviving, reachableMethods, execReachable)
       val removedClasses = reachableClassNodes.size - surviving.size

@@ -19,16 +19,12 @@ with `this.type`: `new CallGraph[this.type](this)`. The type parameter carries t
 type through, so the compiler can prove all modules share the same `BTypes` instance without
 `self.type` refinement types or abstract vals.
 
-### Unify class hierarchy into a shared data structure
+### ~~Unify class hierarchy into a shared data structure~~ (done)
 
-The subclass map (`Map[String, Set[String]]`) is built independently in three places:
-- `ReachabilityAnalysis.methodLevelBFS` (lines 158–164)
-- `ClosedWorldAnalysis.buildHierarchy` (lines 41–50)
-- `BTypes` (the class hierarchy cache)
-
-Each constructs its own copy from the same `ClassNode` list. Create a single shared
-`ClassHierarchy` built once and passed through the pipeline. This also provides a natural
-home for the supertype index needed to fix RTA performance (see below).
+Created `ClassHierarchy` (classByName + subclasses map) built once in `Goron.run()` and
+passed to `ReachabilityAnalysis` and `ClosedWorldAnalysis`. Eliminated the duplicate
+subclass map construction that was in `methodLevelBFS` and `buildHierarchy`. The shared
+structure also provides a natural home for the supertype index needed to fix RTA performance.
 
 ### Eliminate global mutable state in ReachabilityAnalysis
 

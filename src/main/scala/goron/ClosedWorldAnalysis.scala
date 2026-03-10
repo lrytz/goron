@@ -19,44 +19,26 @@ import scala.tools.asm.tree.{ClassNode, MethodNode}
   */
 object ClosedWorldAnalysis {
 
-  case class ClassHierarchy(
-      /** Map from class internal name to its direct subclasses */
-      subclasses: Map[String, Set[String]],
-      /** Map from class internal name to its ClassNode */
-      classByName: Map[String, ClassNode],
+  case class ClosedWorldResult(
       /** Set of classes that are effectively final (no subclasses) */
       effectivelyFinalClasses: Set[String],
       /** Set of (owner, name, desc) for methods that are effectively final */
       effectivelyFinalMethods: Set[(String, String, String)]
   )
 
-  /** Build the class hierarchy from all program classes. External classes (JDK, etc.) are treated as having unknown
-    * subclasses.
+  /** Analyze the class hierarchy to determine effectively-final classes and methods. External classes (JDK, etc.) are
+    * treated as having unknown subclasses.
     */
-  def buildHierarchy(classNodes: Iterable[ClassNode]): ClassHierarchy = {
-    val classByName = classNodes.map(cn => cn.name -> cn).toMap
-    val subclasses = mutable.Map.empty[String, mutable.Set[String]]
-
-    // Build parent → children map
-    for (cn <- classNodes) {
-      if (cn.superName != null) {
-        subclasses.getOrElseUpdate(cn.superName, mutable.Set.empty) += cn.name
-      }
-      if (cn.interfaces != null) {
-        cn.interfaces.asScala.foreach { iface =>
-          subclasses.getOrElseUpdate(iface, mutable.Set.empty) += cn.name
-        }
-      }
-    }
-
-    val subclassesImmutable = subclasses.view.mapValues(_.toSet).toMap
+  def buildHierarchy(hierarchy: ClassHierarchy): ClosedWorldResult = {
+    val classByName = hierarchy.classByName
+    val subclasses = hierarchy.subclasses
 
     // A class is effectively final if:
     // 1. It's in our classpath (we know all its subclasses)
     // 2. It has no subclasses
     // 3. OR it's already marked final
     val effectivelyFinalClasses = classByName.collect {
-      case (name, cn) if isFinalClass(cn) || !subclassesImmutable.contains(name) =>
+      case (name, cn) if isFinalClass(cn) || !subclasses.contains(name) =>
         name
     }.toSet
 
@@ -67,14 +49,14 @@ object ClosedWorldAnalysis {
     for ((name, cn) <- classByName) {
       if (cn.methods != null) {
         cn.methods.asScala.foreach { mn =>
-          if (isEffectivelyFinalMethod(mn, cn, name, classByName, subclassesImmutable, effectivelyFinalClasses)) {
+          if (isEffectivelyFinalMethod(mn, cn, name, classByName, subclasses, effectivelyFinalClasses)) {
             effectivelyFinalMethods += ((name, mn.name, mn.desc))
           }
         }
       }
     }
 
-    ClassHierarchy(subclassesImmutable, classByName, effectivelyFinalClasses, effectivelyFinalMethods.toSet)
+    ClosedWorldResult(effectivelyFinalClasses, effectivelyFinalMethods.toSet)
   }
 
   private def isFinalClass(cn: ClassNode): Boolean =
@@ -126,7 +108,7 @@ object ClosedWorldAnalysis {
   /** Apply closed-world knowledge to ClassNodes by updating InlineInfo. This marks effectively-final classes and
     * methods so the inliner can be more aggressive.
     */
-  def applyToClassNodes(classNodes: Iterable[ClassNode], hierarchy: ClassHierarchy): Unit = {
+  def applyToClassNodes(classNodes: Iterable[ClassNode], hierarchy: ClosedWorldResult): Unit = {
     // Only mark methods ACC_FINAL in classes that are themselves effectively final (leaf classes).
     // Marking methods final in non-leaf classes can cause ClassFormatErrors when methods
     // override abstract methods from interfaces/traits.
