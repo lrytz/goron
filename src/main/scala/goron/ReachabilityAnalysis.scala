@@ -169,70 +169,72 @@ object ReachabilityAnalysis {
 
     def enqueueMethod(owner: String, name: String, desc: String): Unit = {
       val key = (owner, name, desc)
-      if (!reachableMethods.contains(key)) {
-        classByName.get(owner) match {
-          case Some(cn) if cn.methods != null && cn.methods.asScala.exists(m => m.name == name && m.desc == desc) =>
-            reachableMethods += key
-            methodWorklist += key
-            enqueueClass(owner)
-          case _ =>
-        }
+      if (!reachableMethods.contains(key) && hierarchy.hasMethod(owner, name, desc)) {
+        reachableMethods += key
+        methodWorklist += key
+        enqueueClass(owner)
       }
     }
 
     /** Resolve a method call by walking up the hierarchy from `owner`. */
     def resolveAndEnqueueMethod(owner: String, name: String, desc: String): Unit = {
-      classByName.get(owner) match {
-        case Some(cn) if cn.methods != null && cn.methods.asScala.exists(m => m.name == name && m.desc == desc) =>
-          enqueueMethod(owner, name, desc)
-        case Some(cn) =>
-          resolveMethodUp(cn, name, desc)
-          enqueueClass(owner)
-        case None =>
+      if (hierarchy.hasMethod(owner, name, desc)) {
+        enqueueMethod(owner, name, desc)
+      } else if (classByName.contains(owner)) {
+        resolveMethodUp(owner, name, desc)
+        enqueueClass(owner)
       }
     }
 
-    def resolveMethodUp(cn: ClassNode, name: String, desc: String): Boolean = {
-      var found = false
-      if (!found && cn.superName != null) found = resolveInClass(cn.superName, name, desc)
-      if (!found && cn.interfaces != null) {
-        val it = cn.interfaces.iterator()
-        while (it.hasNext && !found) found = resolveInClass(it.next(), name, desc)
-      }
-      found
-    }
-
-    def resolveInClass(className: String, name: String, desc: String): Boolean = {
+    def resolveMethodUp(className: String, name: String, desc: String): Boolean = {
       classByName.get(className) match {
         case Some(cn) =>
-          if (cn.methods != null && cn.methods.asScala.exists(m => m.name == name && m.desc == desc)) {
-            enqueueMethod(className, name, desc)
-            true
-          } else resolveMethodUp(cn, name, desc)
+          var found = false
+          if (cn.superName != null) found = resolveInClass(cn.superName, name, desc)
+          if (!found && cn.interfaces != null) {
+            val it = cn.interfaces.iterator()
+            while (it.hasNext && !found) found = resolveInClass(it.next(), name, desc)
+          }
+          found
         case None => false
       }
     }
 
-    val virtualCallTargets = mutable.Set.empty[(String, String, String)]
+    def resolveInClass(className: String, name: String, desc: String): Boolean = {
+      if (hierarchy.hasMethod(className, name, desc)) {
+        enqueueMethod(className, name, desc)
+        true
+      } else resolveMethodUp(className, name, desc)
+    }
+
+    // RTA virtual dispatch: index instantiated classes by supertype and virtual calls by owner
+    // for O(relevant) lookups instead of O(all) scans.
+    val virtualCallsByOwner = mutable.Map.empty[String, mutable.Set[(String, String)]]
     val instantiatedClasses = mutable.Set.empty[String]
+    val instantiatedBySuper = mutable.Map.empty[String, mutable.Set[String]]
+    var virtualCallCount = 0
 
     def markInstantiated(className: String): Unit = {
       if (instantiatedClasses.add(className)) {
         enqueueClass(className)
-        // Retroactively resolve virtual calls for this newly instantiated class
-        for ((targetOwner, name, desc) <- virtualCallTargets)
-          if (isSubclassOf(className, targetOwner, classByName))
+        // Add to supertype index and resolve pending virtual calls
+        for (sup <- hierarchy.transitiveSupertypes.getOrElse(className, Set(className))) {
+          instantiatedBySuper.getOrElseUpdate(sup, mutable.Set.empty) += className
+          for ((name, desc) <- virtualCallsByOwner.getOrElse(sup, Nil))
             resolveAndEnqueueMethod(className, name, desc)
+        }
       }
     }
 
     def enqueueVirtualCall(owner: String, name: String, desc: String): Unit = {
-      virtualCallTargets += ((owner, name, desc))
+      val isNew = virtualCallsByOwner.getOrElseUpdate(owner, mutable.Set.empty).add((name, desc))
       enqueueClass(owner)
-      // Only resolve on instantiated subtypes (RTA)
-      for (inst <- instantiatedClasses)
-        if (isSubclassOf(inst, owner, classByName))
+      if (isNew) {
+        virtualCallCount += 1
+        // Resolve on already-instantiated subtypes
+        for (inst <- instantiatedBySuper.getOrElse(owner, Nil))
           resolveAndEnqueueMethod(inst, name, desc)
+      }
     }
 
     // Collect method signatures inherited from external (non-analyzed) superclasses/interfaces.
@@ -275,7 +277,7 @@ object ReachabilityAnalysis {
         progressCallback(
           s"  ${reachableClasses.size} classes, ${reachableMethods.size} methods reachable" +
             s", ${methodsProcessed} methods scanned" +
-            s", ${virtualCallTargets.size} virtual call sites" +
+            s", $virtualCallCount virtual call sites" +
             s", ${instantiatedClasses.size} instantiated types"
         )
         lastProgressTime = now
@@ -316,10 +318,7 @@ object ReachabilityAnalysis {
 
       while (methodWorklist.nonEmpty) {
         val (className, methodName, methodDesc) = methodWorklist.dequeue()
-        for (
-          cn <- classByName.get(className);
-          mn <- cn.methods.asScala.find(m => m.name == methodName && m.desc == methodDesc)
-        )
+        for (mn <- hierarchy.lookupMethod(className, methodName, methodDesc))
           processMethodRefs(mn, enqueueClass, resolveAndEnqueueMethod, enqueueVirtualCall, markInstantiated)
         methodsProcessed += 1
         reportProgress()
@@ -409,16 +408,6 @@ object ReachabilityAnalysis {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-
-  private def isSubclassOf(child: String, parent: String, classByName: Map[String, ClassNode]): Boolean = {
-    if (child == parent) return true
-    classByName.get(child) match {
-      case Some(cn) =>
-        (cn.superName != null && isSubclassOf(cn.superName, parent, classByName)) ||
-        (cn.interfaces != null && cn.interfaces.asScala.exists(i => isSubclassOf(i, parent, classByName)))
-      case None => false
-    }
-  }
 
   private def processMethodRefs(
       mn: MethodNode,

@@ -65,23 +65,14 @@ Silent catch-all handlers mask real errors:
 
 ## Performance
 
-### Improve reachability analysis performance (219s on scala-compiler)
+### ~~Improve reachability analysis performance~~ (done)
 
-The RTA virtual dispatch in `methodLevelBFS` has a quadratic hotspot:
-- `enqueueVirtualCall` iterates **all** `instantiatedClasses` for each new virtual call
-- `markInstantiated` iterates **all** `virtualCallTargets` for each new class
-- Both call `isSubclassOf`, which is O(hierarchy depth) with no memoization
-
-Total cost: O(V × I × D) where V = virtual call targets, I = instantiated classes,
-D = hierarchy depth.
-
-Fixes:
-- Index instantiated classes by supertype for O(1) lookup instead of scanning all
-- Precompute transitive subclass sets or use union-find for `isSubclassOf`
-- Build a `(name, desc) → MethodNode` map per `ClassNode` instead of linear scan of
-  `cn.methods` (Java List) — currently O(n) per lookup, called thousands of times
-- Cache `externalMethods` / `collectExternalClassMethods` results across calls
-  (already partially cached, verify completeness)
+Eliminated the quadratic RTA hotspot with three optimizations in `ClassHierarchy`:
+- Precomputed `transitiveSupertypes` for O(1) `isSubclassOf` (was O(hierarchy depth))
+- Indexed instantiated classes by supertype (`instantiatedBySuper`) and virtual calls by
+  owner (`virtualCallsByOwner`) — both loops now O(relevant) instead of O(all)
+- Per-class `methodIndex: Map[(name, desc) → MethodNode]` for O(1) method lookup
+  (was O(n) linear scan of `cn.methods` Java List)
 
 ### Parallelize local optimizations and serialization
 
