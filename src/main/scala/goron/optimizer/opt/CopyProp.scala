@@ -20,6 +20,11 @@ import scala.tools.asm.Opcodes._
 import scala.tools.asm.Type
 import scala.tools.asm.tree._
 
+object CopyProp {
+  def apply(pp: PostProcessor): CopyProp { val postProcessor: pp.type } =
+    new CopyProp { val postProcessor: pp.type = pp }
+}
+
 abstract class CopyProp {
   val postProcessor: PostProcessor
 

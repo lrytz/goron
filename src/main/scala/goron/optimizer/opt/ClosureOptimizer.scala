@@ -563,6 +563,9 @@ abstract class ClosureOptimizer {
 }
 
 object ClosureOptimizer {
+  def apply(pp: PostProcessor): ClosureOptimizer { val postProcessor: pp.type } =
+    new ClosureOptimizer { val postProcessor: pp.type = pp }
+
   val primitives = "BSIJCFDZV"
   val specializationSuffix = s"(\\$$mc[$primitives]+\\$$sp)".r
 }

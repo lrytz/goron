@@ -24,24 +24,14 @@ final class PostProcessor(val bTypes: BTypes) {
   def compilerSettings: CompilerSettings = bTypes.compilerSettings
   def backendReporting: BackendReporting.Reporter = bTypes.backendReporting
 
-  lazy val backendUtils: BackendUtils { val postProcessor: self.type } = new BackendUtils {
-    val postProcessor: self.type = self
-  }
-  lazy val byteCodeRepository: ByteCodeRepository { val postProcessor: self.type } = new ByteCodeRepository {
-    val postProcessor: self.type = self
-  }
-  lazy val localOpt: LocalOpt { val postProcessor: self.type } = new LocalOpt { val postProcessor: self.type = self }
-  lazy val inliner: Inliner { val postProcessor: self.type } = new Inliner { val postProcessor: self.type = self }
-  lazy val inlinerHeuristics: InlinerHeuristics { val postProcessor: self.type } = new InlinerHeuristics {
-    val postProcessor: self.type = self
-  }
-  lazy val closureOptimizer: ClosureOptimizer { val postProcessor: self.type } = new ClosureOptimizer {
-    val postProcessor: self.type = self
-  }
-  lazy val callGraph: CallGraph { val postProcessor: self.type } = new CallGraph { val postProcessor: self.type = self }
-  lazy val bTypesFromClassfile: BTypesFromClassfile { val postProcessor: self.type } = new BTypesFromClassfile {
-    val postProcessor: self.type = self
-  }
+  lazy val backendUtils = BackendUtils(self)
+  lazy val byteCodeRepository = ByteCodeRepository(self)
+  lazy val localOpt = LocalOpt(self)
+  lazy val inliner = Inliner(self)
+  lazy val inlinerHeuristics = InlinerHeuristics(self)
+  lazy val closureOptimizer = ClosureOptimizer(self)
+  lazy val callGraph = CallGraph(self)
+  lazy val bTypesFromClassfile = BTypesFromClassfile(self)
 
   /** Run global optimizations: build call graph, inline, optimize closures. Called by goron after all classes have been
     * added to the ByteCodeRepository.

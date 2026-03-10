@@ -126,6 +126,11 @@ import scala.tools.asm.tree.analysis.Frame
   * Note on updating the call graph: whenever an optimization eliminates a callsite or a closure instantiation, we
   * eliminate the corresponding entry from the call graph.
   */
+object LocalOpt {
+  def apply(pp: PostProcessor): LocalOpt { val postProcessor: pp.type } =
+    new LocalOpt { val postProcessor: pp.type = pp }
+}
+
 abstract class LocalOpt {
   val postProcessor: PostProcessor
 
@@ -138,14 +143,10 @@ abstract class LocalOpt {
 
   import LocalOptImpls._
 
-  lazy val boxUnbox: BoxUnbox { val postProcessor: LocalOpt.this.postProcessor.type } = new BoxUnbox {
-    val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor
-  }
+  lazy val boxUnbox = BoxUnbox(postProcessor)
   import boxUnbox._
 
-  lazy val copyProp: CopyProp { val postProcessor: LocalOpt.this.postProcessor.type } = new CopyProp {
-    val postProcessor: LocalOpt.this.postProcessor.type = LocalOpt.this.postProcessor
-  }
+  lazy val copyProp = CopyProp(postProcessor)
   import copyProp._
 
   /** Remove unreachable code from a method.

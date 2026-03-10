@@ -11,24 +11,13 @@
 
 ## Architecture
 
-### Replace cake pattern with plain constructor injection
+### ~~Replace cake pattern with plain constructor injection~~ (done)
 
-The `PostProcessor` wiring uses path-dependent-type cake pattern inherited from the
-Scala compiler (`abstract class` + `val postProcessor: PostProcessor` in every module).
-Goron has none of the reasons the compiler needed it — no multi-run lifecycle, no compiler
-plugin extensibility, no parallel pipelines. Every module (`Inliner`, `CallGraph`,
-`LocalOpt`, `BackendUtils`, `ByteCodeRepository`, `InlinerHeuristics`, `ClosureOptimizer`,
-`BTypesFromClassfile`) repeats the same boilerplate:
-
-```scala
-lazy val inliner: Inliner { val postProcessor: self.type } = new Inliner {
-  val postProcessor: self.type = self
-}
-```
-
-Replace with regular classes taking `PostProcessor` (or just `BTypes`) as a constructor
-parameter. This removes ceremony and makes modules easier to instantiate and test in
-isolation.
+Simplified via companion-object factory methods (`Inliner(pp)`, `CallGraph(pp)`, etc.).
+Modules remain abstract classes because `BTypes` uses path-dependent types (`ClassBType`
+etc.) that require `self.type` refinements to prove all modules share the same `BTypes`
+instance. The abstract class + refined `val postProcessor` pattern is the idiomatic Scala 2
+mechanism for this. Factory methods hide the anonymous-subclass boilerplate.
 
 ### Unify class hierarchy into a shared data structure
 

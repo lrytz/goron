@@ -23,6 +23,11 @@ import scala.jdk.CollectionConverters._
 import scala.tools.asm.tree._
 import scala.tools.asm.{Opcodes, Type}
 
+object CallGraph {
+  def apply(pp: PostProcessor): CallGraph { val postProcessor: pp.type } =
+    new CallGraph { val postProcessor: pp.type = pp }
+}
+
 abstract class CallGraph {
   val postProcessor: PostProcessor
 

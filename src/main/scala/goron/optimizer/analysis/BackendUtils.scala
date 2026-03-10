@@ -523,6 +523,9 @@ abstract class BackendUtils {
 }
 
 object BackendUtils {
+  def apply(pp: PostProcessor): BackendUtils { val postProcessor: pp.type } =
+    new BackendUtils { val postProcessor: pp.type = pp }
+
 
   /** A pseudo-flag, added MethodNodes whose maxLocals / maxStack are computed. This allows invoking
     * `computeMaxLocalsMaxStack` whenever running an analyzer but performing the actual computation only when necessary.

@@ -50,7 +50,7 @@ Entry points are classes reachable by the JVM at startup (main classes, reflecti
 
 ## Key Architecture Decisions
 
-**Cake pattern**: The optimizer uses Scala's cake pattern with path-dependent types. `BTypes` is the root trait; `PostProcessor`, `CallGraph`, `Inliner` etc. all depend on a specific `BTypes` instance. Wiring is done in `Goron.createPostProcessor` and `GoronTesting.createPostProcessor`.
+**Cake pattern**: The optimizer uses path-dependent types from `BTypes` (e.g., `ClassBType` is an inner class). All modules (`Inliner`, `CallGraph`, etc.) are abstract classes with `val postProcessor: PostProcessor` to prove they share the same `BTypes` instance via `self.type` refinements. Each module has a companion-object factory method: `Inliner(pp)`, `CallGraph(pp)`, etc. Wiring is done in `PostProcessor` (uses these factories) and `GoronTesting.createPostProcessor`.
 
 **Two-phase reachability analysis** (`ReachabilityAnalysis.scala`):
 - Phase 1 (method-level BFS): follows only methods that are actually called, resolving virtual dispatch and inherited methods through the class hierarchy.

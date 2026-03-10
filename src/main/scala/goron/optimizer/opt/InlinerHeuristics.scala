@@ -481,6 +481,9 @@ abstract class InlinerHeuristics {
 }
 
 object InlinerHeuristics {
+  def apply(pp: PostProcessor): InlinerHeuristics { val postProcessor: pp.type } =
+    new InlinerHeuristics { val postProcessor: pp.type = pp }
+
   sealed trait InlineReason
   case object AnnotatedInline extends InlineReason
   case object SyntheticForwarder extends InlineReason

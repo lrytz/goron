@@ -17,6 +17,11 @@ import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes
 import scala.tools.asm.tree.{ClassNode, InnerClassNode}
 
+object BTypesFromClassfile {
+  def apply(pp: PostProcessor): BTypesFromClassfile { val postProcessor: pp.type } =
+    new BTypesFromClassfile { val postProcessor: pp.type = pp }
+}
+
 abstract class BTypesFromClassfile {
   val postProcessor: PostProcessor
 

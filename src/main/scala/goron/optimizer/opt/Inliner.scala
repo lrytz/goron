@@ -24,6 +24,11 @@ import scala.tools.asm.Type
 import scala.tools.asm.tree._
 import scala.tools.asm.tree.analysis.Value
 
+object Inliner {
+  def apply(pp: PostProcessor): Inliner { val postProcessor: pp.type } =
+    new Inliner { val postProcessor: pp.type = pp }
+}
+
 abstract class Inliner {
   val postProcessor: PostProcessor
 

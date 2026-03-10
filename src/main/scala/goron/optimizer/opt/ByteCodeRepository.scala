@@ -24,6 +24,11 @@ import scala.tools.asm.{Attribute, Type}
 /** The ByteCodeRepository provides utilities to read the bytecode of classfiles from the compilation classpath. Parsed
   * classes are cached in the `classes` map.
   */
+object ByteCodeRepository {
+  def apply(pp: PostProcessor): ByteCodeRepository { val postProcessor: pp.type } =
+    new ByteCodeRepository { val postProcessor: pp.type = pp }
+}
+
 abstract class ByteCodeRepository {
   val postProcessor: PostProcessor
 
