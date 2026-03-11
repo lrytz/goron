@@ -1,5 +1,6 @@
 # docker compose build && docker compose run --rm claude
-# claude --dangerously-skip-permissions
+# -> claude --dangerously-skip-permissions
+# -> shift+enter doesn't work, type `\` at the end of the line to insert a line break
 services:
   claude:
     build: .
