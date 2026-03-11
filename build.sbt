@@ -42,5 +42,6 @@ lazy val bench = (project in file("bench"))
     Jmh / javaOptions ++= Seq("-Xmx4g", "-Xms4g"),
     libraryDependencies ++= Seq(
       "org.scala-lang" % "scala-compiler" % scalaVersion.value,
+      "io.get-coursier" %% "coursier" % "2.1.24",
     ),
   )

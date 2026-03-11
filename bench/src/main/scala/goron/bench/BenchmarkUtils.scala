@@ -16,36 +16,25 @@ import scala.tools.nsc.{Global, Settings}
 
 /** Shared infrastructure for goron benchmarks.
   *
-  * Provides Maven jar downloading with caching, in-process Scala compilation,
+  * Provides dependency resolution via coursier, in-process Scala compilation,
   * goron optimization, and classloader isolation for stock vs optimized bytecode.
   */
 object BenchmarkUtils {
 
-  private val cacheDir: Path = {
-    val dir = Paths.get(System.getProperty("user.home"), ".cache", "goron-bench")
-    Files.createDirectories(dir)
-    dir
-  }
-
-  /** Download a jar from a URL, caching in ~/.cache/goron-bench/. */
-  def downloadJar(url: String, fileName: String): File = {
-    val cached = cacheDir.resolve(fileName).toFile
-    if (cached.exists()) return cached
-    val conn = new URL(url).openConnection()
-    val in = conn.getInputStream
-    try {
-      Files.copy(in, cached.toPath)
-    } finally {
-      in.close()
+  /** Resolve a Maven dependency and all its transitive dependencies via coursier.
+    * Returns all jar files including transitive deps.
+    */
+  def resolve(dependencies: String*): Array[File] = {
+    import coursier._
+    val deps = dependencies.map { coord =>
+      val parts = coord.split(":")
+      if (parts.length != 3) throw new IllegalArgumentException(s"Expected group:artifact:version, got: $coord")
+      Dependency(Module(Organization(parts(0)), ModuleName(parts(1))), parts(2))
     }
-    cached
-  }
-
-  /** Download a Maven Central artifact jar. */
-  def downloadMavenJar(group: String, artifact: String, version: String): File = {
-    val groupPath = group.replace('.', '/')
-    val url = s"https://repo1.maven.org/maven2/$groupPath/$artifact/$version/$artifact-$version.jar"
-    downloadJar(url, s"$artifact-$version.jar")
+    val files = Fetch()
+      .addDependencies(deps: _*)
+      .run()
+    files.toArray
   }
 
   /** Run goron optimization on a set of jars with given entry points. Returns the optimized jar. */
@@ -84,7 +73,11 @@ object BenchmarkUtils {
     new PostProcessor(settings, cp, BackendReporting.SilentReporter)
   }
 
-  /** Compile source code, then optimize with goron. Returns (stockClassBytes, optimizedClassBytes). */
+  /** Compile source code, then optimize with goron. Returns (stockClassBytes, optimizedClassBytes).
+    *
+    * The compiled code is optimized in isolation (without scala-library in the optimization scope).
+    * Both stock and optimized bytecode still reference scala-library classes at runtime.
+    */
   def compileAndOptimize(
       code: String,
       config: GoronConfig = defaultConfig
@@ -120,7 +113,8 @@ object BenchmarkUtils {
   }
 
   /** Create a ClassLoader that loads classes from in-memory byte arrays.
-    * Uses the current thread's context classloader as parent so scala-library classes are available.
+    * Uses the benchmark classloader as parent so scala-library classes are available
+    * (the compiled micro-benchmark code still references scala-library at runtime).
     */
   def classLoaderFromBytes(classBytes: Map[String, Array[Byte]]): ClassLoader = {
     val parent = getClass.getClassLoader
@@ -136,7 +130,10 @@ object BenchmarkUtils {
     }
   }
 
-  /** Create a URLClassLoader from jar files, isolated from the benchmark classpath. */
+  /** Create a URLClassLoader from jar files, isolated from the benchmark classpath.
+    * Uses the boot classloader as parent so only JDK classes are inherited.
+    * Suitable for app benchmarks where the jars contain all needed classes (including scala-library).
+    */
   def classLoaderFromJars(jars: Array[File]): URLClassLoader = {
     new URLClassLoader(jars.map(_.toURI.toURL), ClassLoader.getSystemClassLoader.getParent)
   }

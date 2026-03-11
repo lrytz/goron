@@ -90,6 +90,23 @@ class BoxUnboxTest extends GoronTesting {
     assertNoInvoke(getMethod(c, "t4"))
   }
 
+  test("box-unbox Int and Char use correct method names") {
+    // Regression: goron was generating boxToInt/boxToChar instead of boxToInteger/boxToCharacter
+    val code =
+      """class C {
+        |  def boxInt(i: Int): Any = i
+        |  def boxChar(c: Char): Any = c
+        |  def unboxInt(a: Any): Int = a.asInstanceOf[Int]
+        |  def unboxChar(a: Any): Char = a.asInstanceOf[Char]
+        |}
+      """.stripMargin
+    val c = compileAndOptimizeClass(code)
+    assertInvoke(getMethod(c, "boxInt"), "scala/runtime/BoxesRunTime", "boxToInteger")
+    assertInvoke(getMethod(c, "boxChar"), "scala/runtime/BoxesRunTime", "boxToCharacter")
+    assertInvoke(getMethod(c, "unboxInt"), "scala/runtime/BoxesRunTime", "unboxToInt")
+    assertInvoke(getMethod(c, "unboxChar"), "scala/runtime/BoxesRunTime", "unboxToChar")
+  }
+
   test("eliminate unused box") {
     // Box is created but never used - should be eliminated by dead store elimination
     val code =

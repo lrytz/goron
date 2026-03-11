@@ -1,6 +1,5 @@
 package goron.bench.apps
 
-import goron.GoronConfig
 import goron.bench.BenchmarkUtils
 import org.openjdk.jmh.annotations._
 import org.openjdk.jmh.infra.Blackhole
@@ -35,25 +34,17 @@ class ParserCombinatorsBench {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val parserCombs = BenchmarkUtils.downloadMavenJar(
-      "org.scala-lang.modules",
-      "scala-parser-combinators_2.13",
-      "2.4.0"
-    )
-
-    val scalaLib = findScalaLibrary()
-    val jars = Array(parserCombs, scalaLib)
+    val jars = BenchmarkUtils.resolve("org.scala-lang.modules:scala-parser-combinators_2.13:2.4.0")
 
     stockLoader = BenchmarkUtils.classLoaderFromJars(jars)
 
     val entryPoints = List(
       "scala/util/parsing/combinator/Parsers",
       "scala/util/parsing/combinator/RegexParsers",
-      "scala/util/parsing/combinator/JavaTokenParsers"
+      "scala/util/parsing/combinator/JavaTokenParsers",
+      "scala/util/parsing/input/CharSequenceReader"
     )
-    // Disable DCE: we only specify partial entry points
-    val config = GoronConfig(inputJars = Nil, outputJar = "", eliminateDeadCode = false)
-    val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints, config)
+    val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints)
     optimizedLoader = BenchmarkUtils.classLoaderFromJars(Array(optimizedJar))
   }
 
@@ -65,30 +56,22 @@ class ParserCombinatorsBench {
 
   @Benchmark
   def stock(bh: Blackhole): Unit = {
-    bh.consume(runParserWorkload(stockLoader))
+    bh.consume(runWorkload(stockLoader))
   }
 
   @Benchmark
   def goron(bh: Blackhole): Unit = {
-    bh.consume(runParserWorkload(optimizedLoader))
+    bh.consume(runWorkload(optimizedLoader))
   }
 
-  private def runParserWorkload(cl: ClassLoader): AnyRef = {
-    // Exercise the parser combinator classes via reflection
-    // Load core classes to trigger class initialization and exercise optimized dispatch
-    val parsersClass = cl.loadClass("scala.util.parsing.combinator.Parsers")
-    val regexParsersClass = cl.loadClass("scala.util.parsing.combinator.RegexParsers")
-
-    // Load the CharSequenceReader for parsing strings
+  private def runWorkload(cl: ClassLoader): AnyRef = {
     val readerClass = cl.loadClass("scala.util.parsing.input.CharSequenceReader")
     val readerCtor = readerClass.getConstructor(classOf[CharSequence])
 
     var result: AnyRef = null
     for (_ <- 0 until 200) {
       for (expr <- expressions) {
-        // Create a reader for each expression
         val reader = readerCtor.newInstance(expr)
-        // Exercise reader operations (atEnd, first, rest, pos)
         val atEndMethod = readerClass.getMethod("atEnd")
         val firstMethod = readerClass.getMethod("first")
         val restMethod = readerClass.getMethod("rest")
@@ -101,13 +84,5 @@ class ParserCombinatorsBench {
       }
     }
     result
-  }
-
-  private def findScalaLibrary(): File = {
-    val cp = System.getProperty("java.class.path", "")
-    cp.split(File.pathSeparator)
-      .map(new File(_))
-      .find(f => f.getName.contains("scala-library") && f.getName.endsWith(".jar"))
-      .getOrElse(throw new RuntimeException("scala-library not found on classpath"))
   }
 }

@@ -1,6 +1,5 @@
 package goron.bench.apps
 
-import goron.GoronConfig
 import goron.bench.BenchmarkUtils
 import org.openjdk.jmh.annotations._
 import org.openjdk.jmh.infra.Blackhole
@@ -28,23 +27,27 @@ class CatsBench {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val catsCore = BenchmarkUtils.downloadMavenJar("org.typelevel", "cats-core_2.13", "2.12.0")
-    val catsKernel = BenchmarkUtils.downloadMavenJar("org.typelevel", "cats-kernel_2.13", "2.12.0")
-
-    val scalaLib = findScalaLibrary()
-    val jars = Array(catsCore, catsKernel, scalaLib)
+    val jars = BenchmarkUtils.resolve("org.typelevel:cats-core_2.13:2.12.0")
 
     stockLoader = BenchmarkUtils.classLoaderFromJars(jars)
 
     val entryPoints = List(
       "cats/Eval$",
       "cats/Eval",
+      "cats/Eval$Now",
+      "cats/Eval$Later",
+      "cats/Eval$Always",
+      "cats/Eval$Defer",
+      "cats/Eval$FlatMap",
+      "cats/Eval$Memoize",
       "cats/data/Chain$",
-      "cats/data/Chain"
+      "cats/data/Chain",
+      "cats/data/Chain$Empty$",
+      "cats/data/Chain$Singleton",
+      "cats/data/Chain$Append",
+      "cats/data/Chain$Wrap"
     )
-    // Disable DCE: we only specify partial entry points
-    val config = GoronConfig(inputJars = Nil, outputJar = "", eliminateDeadCode = false)
-    val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints, config)
+    val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints)
     optimizedLoader = BenchmarkUtils.classLoaderFromJars(Array(optimizedJar))
   }
 
@@ -56,15 +59,15 @@ class CatsBench {
 
   @Benchmark
   def stock(bh: Blackhole): Unit = {
-    bh.consume(runCatsWorkload(stockLoader))
+    bh.consume(runWorkload(stockLoader))
   }
 
   @Benchmark
   def goron(bh: Blackhole): Unit = {
-    bh.consume(runCatsWorkload(optimizedLoader))
+    bh.consume(runWorkload(optimizedLoader))
   }
 
-  private def runCatsWorkload(cl: ClassLoader): AnyRef = {
+  private def runWorkload(cl: ClassLoader): AnyRef = {
     // Exercise Eval trampolining via reflection
     val evalClass = cl.loadClass("cats.Eval$")
     val evalModule = evalClass.getField("MODULE$").get(null)
@@ -101,13 +104,5 @@ class CatsBench {
     }
 
     result
-  }
-
-  private def findScalaLibrary(): File = {
-    val cp = System.getProperty("java.class.path", "")
-    cp.split(File.pathSeparator)
-      .map(new File(_))
-      .find(f => f.getName.contains("scala-library") && f.getName.endsWith(".jar"))
-      .getOrElse(throw new RuntimeException("scala-library not found on classpath"))
   }
 }

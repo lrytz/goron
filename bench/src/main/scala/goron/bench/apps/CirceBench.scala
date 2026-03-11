@@ -1,6 +1,5 @@
 package goron.bench.apps
 
-import goron.GoronConfig
 import goron.bench.BenchmarkUtils
 import org.openjdk.jmh.annotations._
 import org.openjdk.jmh.infra.Blackhole
@@ -27,25 +26,24 @@ class CirceBench {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val circeCore = BenchmarkUtils.downloadMavenJar("io.circe", "circe-core_2.13", "0.14.10")
-    val circeNumbers = BenchmarkUtils.downloadMavenJar("io.circe", "circe-numbers_2.13", "0.14.10")
-    val catsCore = BenchmarkUtils.downloadMavenJar("org.typelevel", "cats-core_2.13", "2.12.0")
-    val catsKernel = BenchmarkUtils.downloadMavenJar("org.typelevel", "cats-kernel_2.13", "2.12.0")
-
-    val scalaLib = findScalaLibrary()
-    val jars = Array(circeCore, circeNumbers, catsCore, catsKernel, scalaLib)
+    val jars = BenchmarkUtils.resolve("io.circe:circe-core_2.13:0.14.10")
 
     stockLoader = BenchmarkUtils.classLoaderFromJars(jars)
 
     val entryPoints = List(
       "io/circe/Json$",
       "io/circe/Json",
+      "io/circe/Json$JNull",
+      "io/circe/Json$JBoolean",
+      "io/circe/Json$JNumber",
+      "io/circe/Json$JString",
+      "io/circe/Json$JArray",
+      "io/circe/Json$JObject",
       "io/circe/JsonObject$",
-      "io/circe/JsonObject"
+      "io/circe/JsonObject",
+      "io/circe/JsonObject$LinkedHashMapJsonObject"
     )
-    // Disable DCE: we only specify partial entry points; DCE would strip concrete subclasses
-    val config = GoronConfig(inputJars = Nil, outputJar = "", eliminateDeadCode = false)
-    val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints, config)
+    val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints)
     optimizedLoader = BenchmarkUtils.classLoaderFromJars(Array(optimizedJar))
   }
 
@@ -57,19 +55,18 @@ class CirceBench {
 
   @Benchmark
   def stock(bh: Blackhole): Unit = {
-    bh.consume(runCirceWorkload(stockLoader))
+    bh.consume(runWorkload(stockLoader))
   }
 
   @Benchmark
   def goron(bh: Blackhole): Unit = {
-    bh.consume(runCirceWorkload(optimizedLoader))
+    bh.consume(runWorkload(optimizedLoader))
   }
 
-  private def runCirceWorkload(cl: ClassLoader): AnyRef = {
+  private def runWorkload(cl: ClassLoader): AnyRef = {
     val jsonClass = cl.loadClass("io.circe.Json$")
     val jsonModule = jsonClass.getField("MODULE$").get(null)
 
-    // Build JSON values via reflection: Json.fromInt, Json.fromString, Json.arr, Json.obj
     val fromIntMethod = jsonClass.getMethod("fromInt", classOf[Int])
     val fromStringMethod = jsonClass.getMethod("fromString", classOf[String])
     val nullMethod = jsonClass.getMethod("Null")
@@ -97,13 +94,5 @@ class CirceBench {
       noSpacesMethod.invoke(jsonNull)
     }
     result
-  }
-
-  private def findScalaLibrary(): File = {
-    val cp = System.getProperty("java.class.path", "")
-    cp.split(File.pathSeparator)
-      .map(new File(_))
-      .find(f => f.getName.contains("scala-library") && f.getName.endsWith(".jar"))
-      .getOrElse(throw new RuntimeException("scala-library not found on classpath"))
   }
 }

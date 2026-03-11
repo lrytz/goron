@@ -6,10 +6,10 @@ import org.openjdk.jmh.infra.Blackhole
 
 import java.util.concurrent.TimeUnit
 
-/** Benchmark for combined optimizations on pipeline-style code.
+/** Benchmark for combined optimizations on collection pipelines.
   *
-  * Tests chained higher-order final method calls that exercise inlining + closure elimination + boxing
-  * optimizations together, simulating the pattern of collection pipelines.
+  * Tests map/filter/sum and foldLeft patterns that exercise inlining + closure elimination + boxing
+  * optimizations together.
   */
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -22,41 +22,20 @@ class CollectionPipelineBench {
   private var stockLoader: ClassLoader = _
   private var optimizedLoader: ClassLoader = _
 
-  // Simulates map + filter + sum pipeline with self-contained higher-order methods
   private val mapFilterSumCode =
-    """object Pipeline {
-      |  @inline final def map(start: Int, end: Int, f: Int => Int, g: Int => Unit): Unit = {
-      |    var i = start
-      |    while (i < end) { g(f(i)); i += 1 }
-      |  }
-      |  @inline final def filterSum(x: Int, pred: Int => Boolean, acc: Array[Int]): Unit = {
-      |    if (pred(x)) acc(0) += x
-      |  }
-      |}
-      |
-      |object MapFilterSumRunner {
+    """object MapFilterSumRunner {
       |  def run(n: Int): Int = {
-      |    val acc = new Array[Int](1)
-      |    Pipeline.map(1, n, x => x * 2, x => Pipeline.filterSum(x, _ > 50, acc))
-      |    acc(0)
+      |    (1 to n).map(_ * 2).filter(_ > 50).sum
       |  }
       |}
       |""".stripMargin
 
-  // Simulates foldLeft with a self-contained higher-order method
   private val foldLeftCode =
-    """object Folder {
-      |  @inline final def foldLeft(start: Int, end: Int, zero: Int, f: (Int, Int) => Int): Int = {
-      |    var acc = zero
-      |    var i = start
-      |    while (i < end) { acc = f(acc, i); i += 1 }
-      |    acc
-      |  }
-      |}
-      |
-      |object FoldLeftRunner {
+    """object FoldLeftRunner {
       |  def run(n: Int): Int = {
-      |    Folder.foldLeft(1, n, 0, (acc, x) => acc + x * x)
+      |    (1 to n).foldLeft(0) { (acc, x) =>
+      |      acc + x * x
+      |    }
       |  }
       |}
       |""".stripMargin
@@ -83,7 +62,7 @@ class CollectionPipelineBench {
     }
     val cls = stockLoader.loadClass(runner)
     val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
+    bh.consume(method.invoke(null, Integer.valueOf(1000)))
   }
 
   @Benchmark
@@ -94,6 +73,6 @@ class CollectionPipelineBench {
     }
     val cls = optimizedLoader.loadClass(runner)
     val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
+    bh.consume(method.invoke(null, Integer.valueOf(1000)))
   }
 }

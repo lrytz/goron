@@ -1012,55 +1012,60 @@ class BTypes(
     lazy val boxedClasses: Set[ClassBType] = boxedClassOfPrimitive.values.toSet
 
     // Boxing/unboxing method descriptors (hardcoded from known JDK/Scala signatures)
-    private lazy val primitiveInfo: List[(String, PrimitiveBType, String, String)] = List(
-      // (primName, primBType, boxedInternalName, unboxMethodName)
-      ("Boolean", BOOL, "java/lang/Boolean", "booleanValue"),
-      ("Byte", BYTE, "java/lang/Byte", "byteValue"),
-      ("Short", SHORT, "java/lang/Short", "shortValue"),
-      ("Char", CHAR, "java/lang/Character", "charValue"),
-      ("Int", INT, "java/lang/Integer", "intValue"),
-      ("Long", LONG, "java/lang/Long", "longValue"),
-      ("Float", FLOAT, "java/lang/Float", "floatValue"),
-      ("Double", DOUBLE, "java/lang/Double", "doubleValue")
+    // The compiler gets boxedName from the symbol table (boxedClass(primitive).name);
+    // here we hardcode the equivalent since goron doesn't have access to symbols.
+    private lazy val primitiveInfo: List[(String, String, PrimitiveBType, String, String)] = List(
+      // (primName, boxedName, primBType, boxedInternalName, unboxMethodName)
+      ("Boolean", "Boolean", BOOL, "java/lang/Boolean", "booleanValue"),
+      ("Byte", "Byte", BYTE, "java/lang/Byte", "byteValue"),
+      ("Short", "Short", SHORT, "java/lang/Short", "shortValue"),
+      ("Char", "Character", CHAR, "java/lang/Character", "charValue"),
+      ("Int", "Integer", INT, "java/lang/Integer", "intValue"),
+      ("Long", "Long", LONG, "java/lang/Long", "longValue"),
+      ("Float", "Float", FLOAT, "java/lang/Float", "floatValue"),
+      ("Double", "Double", DOUBLE, "java/lang/Double", "doubleValue")
     )
 
     // Z -> MethodNameAndType(boxToBoolean,(Z)Ljava/lang/Boolean;)
     lazy val srBoxesRuntimeBoxToMethods: Map[BType, MethodNameAndType] = primitiveInfo.map {
-      case (name, prim, boxed, _) =>
+      case (_, boxedName, prim, boxed, _) =>
         val desc = MethodBType(Array(prim), classBType(boxed))
-        prim -> MethodNameAndType("boxTo" + name, desc)
+        prim -> MethodNameAndType("boxTo" + boxedName, desc)
     }.toMap
 
     // Z -> MethodNameAndType(unboxToBoolean,(Ljava/lang/Object;)Z)
     lazy val srBoxesRuntimeUnboxToMethods: Map[BType, MethodNameAndType] = primitiveInfo.map {
-      case (name, prim, _, _) =>
+      case (primName, _, prim, _, _) =>
         val desc = MethodBType(Array(ObjectRef), prim)
-        prim -> MethodNameAndType("unboxTo" + name, desc)
+        prim -> MethodNameAndType("unboxTo" + primName, desc)
     }.toMap
 
     // java/lang/Boolean -> MethodNameAndType(valueOf,(Z)Ljava/lang/Boolean;)
-    lazy val javaBoxMethods: Map[InternalName, MethodNameAndType] = primitiveInfo.map { case (_, prim, boxed, _) =>
-      val desc = MethodBType(Array(prim), classBType(boxed))
-      boxed -> MethodNameAndType("valueOf", desc)
+    lazy val javaBoxMethods: Map[InternalName, MethodNameAndType] = primitiveInfo.map {
+      case (_, _, prim, boxed, _) =>
+        val desc = MethodBType(Array(prim), classBType(boxed))
+        boxed -> MethodNameAndType("valueOf", desc)
     }.toMap
 
     // java/lang/Boolean -> MethodNameAndType(booleanValue,()Z)
     lazy val javaUnboxMethods: Map[InternalName, MethodNameAndType] = primitiveInfo.map {
-      case (_, prim, boxed, unboxMethod) =>
+      case (_, _, prim, boxed, unboxMethod) =>
         val desc = MethodBType(Array.empty[BType], prim)
         boxed -> MethodNameAndType(unboxMethod, desc)
     }.toMap
 
     // boolean2Boolean -> (Z)Ljava/lang/Boolean;
-    lazy val predefAutoBoxMethods: Map[String, MethodBType] = primitiveInfo.map { case (name, prim, boxed, _) =>
-      val methodName = name.toLowerCase + "2" + name
-      methodName -> MethodBType(Array(prim), classBType(boxed))
+    lazy val predefAutoBoxMethods: Map[String, MethodBType] = primitiveInfo.map {
+      case (primName, boxedName, prim, boxed, _) =>
+        val methodName = primName.toLowerCase + "2" + boxedName
+        methodName -> MethodBType(Array(prim), classBType(boxed))
     }.toMap
 
     // Boolean2boolean -> (Ljava/lang/Boolean;)Z
-    lazy val predefAutoUnboxMethods: Map[String, MethodBType] = primitiveInfo.map { case (name, prim, boxed, _) =>
-      val methodName = name + "2" + name.toLowerCase
-      methodName -> MethodBType(Array(classBType(boxed)), prim)
+    lazy val predefAutoUnboxMethods: Map[String, MethodBType] = primitiveInfo.map {
+      case (primName, boxedName, prim, boxed, _) =>
+        val methodName = boxedName + "2" + primName.toLowerCase
+        methodName -> MethodBType(Array(classBType(boxed)), prim)
     }.toMap
 
     // Ref class methods
@@ -1088,7 +1093,7 @@ class BTypes(
     }.toMap
 
     lazy val primitiveBoxConstructors: Map[InternalName, MethodNameAndType] = primitiveInfo.map {
-      case (_, prim, boxed, _) =>
+      case (_, _, prim, boxed, _) =>
         val desc = MethodBType(Array(prim), UNIT)
         boxed -> MethodNameAndType("<init>", desc)
     }.toMap
