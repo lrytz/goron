@@ -70,8 +70,8 @@ class DevirtualizationBench {
       """.stripMargin, "SealedDriver")
   }
 
-  @Benchmark def stockSingleImpl(bh: Blackhole): Unit = bh.consume(singleImpl.stock())
-  @Benchmark def goronSingleImpl(bh: Blackhole): Unit = bh.consume(singleImpl.goron())
-  @Benchmark def stockSealedHierarchy(bh: Blackhole): Unit = bh.consume(sealedHierarchy.stock())
-  @Benchmark def goronSealedHierarchy(bh: Blackhole): Unit = bh.consume(sealedHierarchy.goron())
+  @Benchmark def singleImplStock(bh: Blackhole): Unit = bh.consume(singleImpl.stock())
+  @Benchmark def singleImplGoron(bh: Blackhole): Unit = bh.consume(singleImpl.goron())
+  @Benchmark def sealedHierarchyStock(bh: Blackhole): Unit = bh.consume(sealedHierarchy.stock())
+  @Benchmark def sealedHierarchyGoron(bh: Blackhole): Unit = bh.consume(sealedHierarchy.goron())
 }

@@ -65,8 +65,8 @@ class ClosureBench {
       """.stripMargin, "ClosureSpecDriver")
   }
 
-  @Benchmark def stockClosureElimination(bh: Blackhole): Unit = bh.consume(closureElim.stock())
-  @Benchmark def goronClosureElimination(bh: Blackhole): Unit = bh.consume(closureElim.goron())
-  @Benchmark def stockClosureSpecialization(bh: Blackhole): Unit = bh.consume(closureSpec.stock())
-  @Benchmark def goronClosureSpecialization(bh: Blackhole): Unit = bh.consume(closureSpec.goron())
+  @Benchmark def closureEliminationStock(bh: Blackhole): Unit = bh.consume(closureElim.stock())
+  @Benchmark def closureEliminationGoron(bh: Blackhole): Unit = bh.consume(closureElim.goron())
+  @Benchmark def closureSpecializationStock(bh: Blackhole): Unit = bh.consume(closureSpec.stock())
+  @Benchmark def closureSpecializationGoron(bh: Blackhole): Unit = bh.consume(closureSpec.goron())
 }

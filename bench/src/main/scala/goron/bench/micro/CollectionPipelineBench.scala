@@ -41,8 +41,8 @@ class CollectionPipelineBench {
       """.stripMargin, "FoldLeftDriver")
   }
 
-  @Benchmark def stockMapFilterSum(bh: Blackhole): Unit = bh.consume(mapFilterSum.stock())
-  @Benchmark def goronMapFilterSum(bh: Blackhole): Unit = bh.consume(mapFilterSum.goron())
-  @Benchmark def stockFoldLeft(bh: Blackhole): Unit = bh.consume(foldLeft.stock())
-  @Benchmark def goronFoldLeft(bh: Blackhole): Unit = bh.consume(foldLeft.goron())
+  @Benchmark def mapFilterSumStock(bh: Blackhole): Unit = bh.consume(mapFilterSum.stock())
+  @Benchmark def mapFilterSumGoron(bh: Blackhole): Unit = bh.consume(mapFilterSum.goron())
+  @Benchmark def foldLeftStock(bh: Blackhole): Unit = bh.consume(foldLeft.stock())
+  @Benchmark def foldLeftGoron(bh: Blackhole): Unit = bh.consume(foldLeft.goron())
 }

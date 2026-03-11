@@ -80,10 +80,10 @@ class BoxUnboxBench {
       """.stripMargin, "RefElimDriver")
   }
 
-  @Benchmark def stockBoxUnbox(bh: Blackhole): Unit = bh.consume(boxUnbox.stock())
-  @Benchmark def goronBoxUnbox(bh: Blackhole): Unit = bh.consume(boxUnbox.goron())
-  @Benchmark def stockTupleUnbox(bh: Blackhole): Unit = bh.consume(tupleUnbox.stock())
-  @Benchmark def goronTupleUnbox(bh: Blackhole): Unit = bh.consume(tupleUnbox.goron())
-  @Benchmark def stockRefElimination(bh: Blackhole): Unit = bh.consume(refElim.stock())
-  @Benchmark def goronRefElimination(bh: Blackhole): Unit = bh.consume(refElim.goron())
+  @Benchmark def boxUnboxStock(bh: Blackhole): Unit = bh.consume(boxUnbox.stock())
+  @Benchmark def boxUnboxGoron(bh: Blackhole): Unit = bh.consume(boxUnbox.goron())
+  @Benchmark def tupleUnboxStock(bh: Blackhole): Unit = bh.consume(tupleUnbox.stock())
+  @Benchmark def tupleUnboxGoron(bh: Blackhole): Unit = bh.consume(tupleUnbox.goron())
+  @Benchmark def refEliminationStock(bh: Blackhole): Unit = bh.consume(refElim.stock())
+  @Benchmark def refEliminationGoron(bh: Blackhole): Unit = bh.consume(refElim.goron())
 }

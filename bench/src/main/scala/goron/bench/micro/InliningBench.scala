@@ -65,8 +65,8 @@ class InliningBench {
       """.stripMargin, "InlineChainDriver")
   }
 
-  @Benchmark def stockInlineFinal(bh: Blackhole): Unit = bh.consume(inlineFinal.stock())
-  @Benchmark def goronInlineFinal(bh: Blackhole): Unit = bh.consume(inlineFinal.goron())
-  @Benchmark def stockInlineChain(bh: Blackhole): Unit = bh.consume(inlineChain.stock())
-  @Benchmark def goronInlineChain(bh: Blackhole): Unit = bh.consume(inlineChain.goron())
+  @Benchmark def inlineFinalStock(bh: Blackhole): Unit = bh.consume(inlineFinal.stock())
+  @Benchmark def inlineFinalGoron(bh: Blackhole): Unit = bh.consume(inlineFinal.goron())
+  @Benchmark def inlineChainStock(bh: Blackhole): Unit = bh.consume(inlineChain.stock())
+  @Benchmark def inlineChainGoron(bh: Blackhole): Unit = bh.consume(inlineChain.goron())
 }
