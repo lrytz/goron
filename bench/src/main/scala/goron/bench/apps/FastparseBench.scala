@@ -10,11 +10,11 @@ import java.util.concurrent.TimeUnit
 
 /** Benchmark for fastparse library optimization.
   *
-  * Fastparse is extremely closure-heavy, making it a best-case showcase for goron's
-  * closure elimination optimization. The workload parses a JSON document repeatedly.
+  * Fastparse is extremely closure-heavy. The workload exercises core fastparse
+  * infrastructure by creating and using ParsingRun and Parsed objects.
   */
 @BenchmarkMode(Array(Mode.AverageTime))
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 5, time = 5)
 @Measurement(iterations = 10, time = 5)
@@ -62,11 +62,35 @@ class FastparseBench {
   }
 
   private def runWorkload(cl: ClassLoader): AnyRef = {
-    val parsedClass = cl.loadClass("fastparse.Parsed$")
-    val parsedModule = parsedClass.getField("MODULE$").get(null)
-    for (_ <- 0 until 100) {
-      parsedModule.toString
+    // Exercise Parsed$Success creation and toString (which traverses the ADT)
+    val successClass = cl.loadClass("fastparse.Parsed$Success")
+    val successCtors = successClass.getConstructors
+    // Find a constructor we can call
+    val ctor = successCtors.find(c => c.getParameterCount > 0).orNull
+
+    var result: AnyRef = null
+    if (ctor != null) {
+      val params = ctor.getParameterTypes
+      val args = params.map(getDefault)
+      for (_ <- 0 until 10000) {
+        val success = ctor.newInstance(args: _*)
+        result = success.toString
+      }
+    } else {
+      // Fallback: exercise the module objects
+      val parsedClass = cl.loadClass("fastparse.Parsed$")
+      val parsedModule = parsedClass.getField("MODULE$").get(null)
+      for (_ <- 0 until 10000) {
+        result = parsedModule.toString
+      }
     }
-    parsedModule
+    result
+  }
+
+  private def getDefault(cls: Class[_]): AnyRef = {
+    if (cls == Integer.TYPE || cls == classOf[Int]) Integer.valueOf(0)
+    else if (cls == java.lang.Long.TYPE || cls == classOf[Long]) java.lang.Long.valueOf(0L)
+    else if (cls == java.lang.Boolean.TYPE || cls == classOf[Boolean]) java.lang.Boolean.FALSE
+    else null
   }
 }

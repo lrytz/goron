@@ -98,6 +98,14 @@ object BenchmarkUtils {
 
     for (cn <- classNodes) pp.byteCodeRepository.add(cn, Some("goron-bench"))
 
+    // Closed-world analysis: mark effectively-final classes/methods so the inliner
+    // can prove they're safe to inline. Without this, inlining doesn't happen.
+    if (config.closedWorld) {
+      val hierarchy = ClassHierarchy.build(classNodes)
+      val closedWorld = ClosedWorldAnalysis.buildHierarchy(hierarchy)
+      ClosedWorldAnalysis.applyToClassNodes(classNodes, closedWorld)
+    }
+
     if (config.optInlinerEnabled || config.optClosureInvocations)
       pp.runGlobalOptimizations(classNodes)
 

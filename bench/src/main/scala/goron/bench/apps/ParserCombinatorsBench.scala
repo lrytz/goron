@@ -11,10 +11,11 @@ import java.util.concurrent.TimeUnit
 /** Benchmark for scala-parser-combinators library optimization.
   *
   * Parser combinators allocate closures heavily for parser composition.
-  * The workload parses arithmetic expressions repeatedly.
+  * The workload walks through input strings using CharSequenceReader, exercising
+  * the core reader dispatch and position tracking.
   */
 @BenchmarkMode(Array(Mode.AverageTime))
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 5, time = 5)
 @Measurement(iterations = 10, time = 5)
@@ -24,13 +25,21 @@ class ParserCombinatorsBench {
   private var stockLoader: URLClassLoader = _
   private var optimizedLoader: URLClassLoader = _
 
-  private val expressions = Array(
-    "1+2*3",
-    "(1+2)*3",
-    "1+2+3+4+5",
-    "((1+2)*(3+4))+5",
-    "1*2*3*4*5+6+7+8"
+  // Cached reflection handles
+  private var stockReader: ReaderHandles = _
+  private var goronReader: ReaderHandles = _
+
+  private class ReaderHandles(
+      val readerCtor: java.lang.reflect.Constructor[_],
+      val atEndMethod: java.lang.reflect.Method,
+      val firstMethod: java.lang.reflect.Method,
+      val restMethod: java.lang.reflect.Method,
+      val posMethod: java.lang.reflect.Method,
+      val dropMethod: java.lang.reflect.Method
   )
+
+  private val inputText =
+    "The quick brown fox jumps over the lazy dog. " * 20
 
   @Setup(Level.Trial)
   def setup(): Unit = {
@@ -46,6 +55,20 @@ class ParserCombinatorsBench {
     )
     val optimizedJar = BenchmarkUtils.optimizeJars(jars, entryPoints)
     optimizedLoader = BenchmarkUtils.classLoaderFromJars(Array(optimizedJar))
+
+    stockReader = setupHandles(stockLoader)
+    goronReader = setupHandles(optimizedLoader)
+  }
+
+  private def setupHandles(cl: ClassLoader): ReaderHandles = {
+    val readerClass = cl.loadClass("scala.util.parsing.input.CharSequenceReader")
+    val readerCtor = readerClass.getConstructor(classOf[CharSequence])
+    val atEndMethod = readerClass.getMethod("atEnd")
+    val firstMethod = readerClass.getMethod("first")
+    val restMethod = readerClass.getMethod("rest")
+    val posMethod = readerClass.getMethod("pos")
+    val dropMethod = readerClass.getMethods.find(m => m.getName == "drop" && m.getParameterCount == 1).orNull
+    new ReaderHandles(readerCtor, atEndMethod, firstMethod, restMethod, posMethod, dropMethod)
   }
 
   @TearDown(Level.Trial)
@@ -56,32 +79,27 @@ class ParserCombinatorsBench {
 
   @Benchmark
   def stock(bh: Blackhole): Unit = {
-    bh.consume(runWorkload(stockLoader))
+    bh.consume(runWorkload(stockReader))
   }
 
   @Benchmark
   def goron(bh: Blackhole): Unit = {
-    bh.consume(runWorkload(optimizedLoader))
+    bh.consume(runWorkload(goronReader))
   }
 
-  private def runWorkload(cl: ClassLoader): AnyRef = {
-    val readerClass = cl.loadClass("scala.util.parsing.input.CharSequenceReader")
-    val readerCtor = readerClass.getConstructor(classOf[CharSequence])
-
+  private def runWorkload(h: ReaderHandles): AnyRef = {
     var result: AnyRef = null
-    for (_ <- 0 until 200) {
-      for (expr <- expressions) {
-        val reader = readerCtor.newInstance(expr)
-        val atEndMethod = readerClass.getMethod("atEnd")
-        val firstMethod = readerClass.getMethod("first")
-        val restMethod = readerClass.getMethod("rest")
 
-        var r = reader
-        while (!(atEndMethod.invoke(r).asInstanceOf[Boolean])) {
-          result = firstMethod.invoke(r)
-          r = restMethod.invoke(r)
-        }
+    for (_ <- 0 until 500) {
+      var r: AnyRef = h.readerCtor.newInstance(inputText).asInstanceOf[AnyRef]
+
+      // Walk through the entire input, exercising first/rest dispatch
+      while (!(h.atEndMethod.invoke(r).asInstanceOf[Boolean])) {
+        h.firstMethod.invoke(r)
+        h.posMethod.invoke(r)
+        r = h.restMethod.invoke(r)
       }
+      result = r
     }
     result
   }
