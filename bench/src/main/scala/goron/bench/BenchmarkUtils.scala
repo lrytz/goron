@@ -114,19 +114,24 @@ object BenchmarkUtils {
 
   /** Holds stock and goron driver handles for a benchmark.
     * Call `stock()` and `goron()` to invoke the driver's `run()` method.
+    * Goron optimization is lazy — it only runs when `goron()` is first called.
     */
   class DriverSetup(
-      val stockModule: AnyRef,
-      val stockRun: java.lang.reflect.Method,
-      val goronModule: AnyRef,
-      val goronRun: java.lang.reflect.Method
+      stockModule: AnyRef,
+      stockRun: java.lang.reflect.Method,
+      goronInit: () => (AnyRef, java.lang.reflect.Method)
   ) {
     def stock(): AnyRef = stockRun.invoke(stockModule)
+
+    private lazy val (goronModule, goronRun) = goronInit()
     def goron(): AnyRef = goronRun.invoke(goronModule)
   }
 
   /** Set up a benchmark by compiling driver code, optimizing with goron, and
     * creating isolated classloaders for stock vs optimized bytecode.
+    *
+    * Goron optimization is deferred until the goron benchmark actually runs,
+    * so running only stock benchmarks doesn't pay the optimization cost.
     *
     * @param driverCode Scala source for the driver (must define an `object` with a `run()` method)
     * @param driverObject the simple name of the driver object (e.g., "CatsDriver")
@@ -147,20 +152,22 @@ object BenchmarkUtils {
     }
 
     val driverBytes = compileAgainstJars(driverCode, jars)
+    val moduleName = driverObject + "$"
 
     // Stock: original jars + driver bytes
     val stockCl = classLoaderFromJarsAndBytes(jars, driverBytes)
-
-    // Goron: run goron on jars + driver, with driver as entry point
-    val driverJar = createJarFromBytes(driverBytes)
-    val entryPoints = driverBytes.keys.map(_.replace('.', '/')).toList
-    val optimizedJar = optimizeJars(jars ++ Array(driverJar), entryPoints)
-    val goronCl = classLoaderFromJars(Array(optimizedJar))
-
-    val moduleName = driverObject + "$"
     val (sm, sr) = loadDriver(stockCl, moduleName)
-    val (gm, gr) = loadDriver(goronCl, moduleName)
-    new DriverSetup(sm, sr, gm, gr)
+
+    // Goron: deferred until first use
+    def initGoron(): (AnyRef, java.lang.reflect.Method) = {
+      val driverJar = createJarFromBytes(driverBytes)
+      val entryPoints = driverBytes.keys.map(_.replace('.', '/')).toList
+      val optimizedJar = optimizeJars(jars ++ Array(driverJar), entryPoints)
+      val goronCl = classLoaderFromJars(Array(optimizedJar))
+      loadDriver(goronCl, moduleName)
+    }
+
+    new DriverSetup(sm, sr, initGoron)
   }
 
   private def loadDriver(cl: ClassLoader, moduleName: String): (AnyRef, java.lang.reflect.Method) = {
