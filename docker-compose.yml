@@ -5,6 +5,8 @@ services:
     build: .
     stdin_open: true
     tty: true
+    environment:
+      - TERM=xterm-256color
     volumes:
       - .:/project
       - home:/home/node
