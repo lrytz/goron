@@ -19,84 +19,54 @@ import java.util.concurrent.TimeUnit
 @Fork(value = 2, jvmArgs = Array("-Xmx2g"))
 class ClosureBench {
 
-  private var stockLoader: ClassLoader = _
-  private var optimizedLoader: ClassLoader = _
-
-  private val closureEliminationCode =
-    """object HOHelper {
-      |  @inline final def transform(x: Int, f: Int => Int): Int = f(x)
-      |  @inline final def combine(a: Int, b: Int, f: (Int, Int) => Int): Int = f(a, b)
-      |}
-      |
-      |object ClosureElimRunner {
-      |  def run(n: Int): Int = {
-      |    var sum = 0
-      |    var i = 0
-      |    while (i < n) {
-      |      sum += HOHelper.transform(i, x => x * x + 1)
-      |      sum += HOHelper.combine(i, sum, (a, b) => a + b * 2)
-      |      i += 1
-      |    }
-      |    sum
-      |  }
-      |}
-      |""".stripMargin
-
-  private val closureSpecializationCode =
-    """object SpecHelper {
-      |  @inline final def applyTwice(x: Int, f: Int => Int): Int = f(f(x))
-      |  @inline final def fold(start: Int, end: Int, acc: Int, f: (Int, Int) => Int): Int = {
-      |    var result = acc
-      |    var i = start
-      |    while (i < end) {
-      |      result = f(result, i)
-      |      i += 1
-      |    }
-      |    result
-      |  }
-      |}
-      |
-      |object ClosureSpecRunner {
-      |  def run(n: Int): Int = {
-      |    val doubled = SpecHelper.applyTwice(n, _ * 2)
-      |    SpecHelper.fold(0, n, doubled, _ + _)
-      |  }
-      |}
-      |""".stripMargin
-
-  @Param(Array("closureElimination", "closureSpecialization"))
-  var variant: String = _
+  private var closureElim: BenchmarkUtils.DriverSetup = _
+  private var closureSpec: BenchmarkUtils.DriverSetup = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val code = variant match {
-      case "closureElimination"     => closureEliminationCode
-      case "closureSpecialization"  => closureSpecializationCode
-    }
-    val (stock, optimized) = BenchmarkUtils.compileAndOptimize(code)
-    stockLoader = BenchmarkUtils.classLoaderFromBytes(stock)
-    optimizedLoader = BenchmarkUtils.classLoaderFromBytes(optimized)
+    closureElim = BenchmarkUtils.setupDriver(
+      """object ClosureElimDriver {
+        |  object HOHelper {
+        |    @inline final def transform(x: Int, f: Int => Int): Int = f(x)
+        |    @inline final def combine(a: Int, b: Int, f: (Int, Int) => Int): Int = f(a, b)
+        |  }
+        |  def run(): AnyRef = {
+        |    var sum = 0
+        |    var i = 0
+        |    while (i < 10000) {
+        |      sum += HOHelper.transform(i, x => x * x + 1)
+        |      sum += HOHelper.combine(i, sum, (a, b) => a + b * 2)
+        |      i += 1
+        |    }
+        |    Integer.valueOf(sum)
+        |  }
+        |}
+      """.stripMargin, "ClosureElimDriver")
+
+    closureSpec = BenchmarkUtils.setupDriver(
+      """object ClosureSpecDriver {
+        |  object SpecHelper {
+        |    @inline final def applyTwice(x: Int, f: Int => Int): Int = f(f(x))
+        |    @inline final def fold(start: Int, end: Int, acc: Int, f: (Int, Int) => Int): Int = {
+        |      var result = acc
+        |      var i = start
+        |      while (i < end) {
+        |        result = f(result, i)
+        |        i += 1
+        |      }
+        |      result
+        |    }
+        |  }
+        |  def run(): AnyRef = {
+        |    val doubled = SpecHelper.applyTwice(10000, _ * 2)
+        |    Integer.valueOf(SpecHelper.fold(0, 10000, doubled, _ + _))
+        |  }
+        |}
+      """.stripMargin, "ClosureSpecDriver")
   }
 
-  @Benchmark
-  def stock(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "closureElimination"    => "ClosureElimRunner"
-      case "closureSpecialization" => "ClosureSpecRunner"
-    }
-    val cls = stockLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
-  }
-
-  @Benchmark
-  def goron(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "closureElimination"    => "ClosureElimRunner"
-      case "closureSpecialization" => "ClosureSpecRunner"
-    }
-    val cls = optimizedLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
-  }
+  @Benchmark def stockClosureElimination(bh: Blackhole): Unit = bh.consume(closureElim.stock())
+  @Benchmark def goronClosureElimination(bh: Blackhole): Unit = bh.consume(closureElim.goron())
+  @Benchmark def stockClosureSpecialization(bh: Blackhole): Unit = bh.consume(closureSpec.stock())
+  @Benchmark def goronClosureSpecialization(bh: Blackhole): Unit = bh.consume(closureSpec.goron())
 }

@@ -19,84 +19,54 @@ import java.util.concurrent.TimeUnit
 @Fork(value = 2, jvmArgs = Array("-Xmx2g"))
 class InliningBench {
 
-  private var stockLoader: ClassLoader = _
-  private var optimizedLoader: ClassLoader = _
-
-  private val inlineFinalCode =
-    """object MathHelper {
-      |  @inline final def square(x: Int): Int = x * x
-      |  @inline final def cube(x: Int): Int = x * x * x
-      |  @inline final def add(a: Int, b: Int): Int = a + b
-      |}
-      |
-      |object InlineFinalRunner {
-      |  def run(n: Int): Int = {
-      |    var sum = 0
-      |    var i = 0
-      |    while (i < n) {
-      |      sum = MathHelper.add(sum, MathHelper.square(i))
-      |      sum = MathHelper.add(sum, MathHelper.cube(i % 10))
-      |      i += 1
-      |    }
-      |    sum
-      |  }
-      |}
-      |""".stripMargin
-
-  private val inlineChainCode =
-    """object ChainHelper {
-      |  @inline final def step1(x: Int): Int = x + 1
-      |  @inline final def step2(x: Int): Int = step1(x) * 2
-      |  @inline final def step3(x: Int): Int = step2(x) + step1(x)
-      |  @inline final def compute(x: Int): Int = step3(x) + step2(x)
-      |}
-      |
-      |object InlineChainRunner {
-      |  def run(n: Int): Int = {
-      |    var sum = 0
-      |    var i = 0
-      |    while (i < n) {
-      |      sum += ChainHelper.compute(i)
-      |      i += 1
-      |    }
-      |    sum
-      |  }
-      |}
-      |""".stripMargin
-
-  @Param(Array("inlineFinal", "inlineChain"))
-  var variant: String = _
+  private var inlineFinal: BenchmarkUtils.DriverSetup = _
+  private var inlineChain: BenchmarkUtils.DriverSetup = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val code = variant match {
-      case "inlineFinal" => inlineFinalCode
-      case "inlineChain" => inlineChainCode
-    }
-    val (stock, optimized) = BenchmarkUtils.compileAndOptimize(code)
-    stockLoader = BenchmarkUtils.classLoaderFromBytes(stock)
-    optimizedLoader = BenchmarkUtils.classLoaderFromBytes(optimized)
+    inlineFinal = BenchmarkUtils.setupDriver(
+      """object InlineFinalDriver {
+        |  object MathHelper {
+        |    @inline final def square(x: Int): Int = x * x
+        |    @inline final def cube(x: Int): Int = x * x * x
+        |    @inline final def add(a: Int, b: Int): Int = a + b
+        |  }
+        |  def run(): AnyRef = {
+        |    var sum = 0
+        |    var i = 0
+        |    while (i < 10000) {
+        |      sum = MathHelper.add(sum, MathHelper.square(i))
+        |      sum = MathHelper.add(sum, MathHelper.cube(i % 10))
+        |      i += 1
+        |    }
+        |    Integer.valueOf(sum)
+        |  }
+        |}
+      """.stripMargin, "InlineFinalDriver")
+
+    inlineChain = BenchmarkUtils.setupDriver(
+      """object InlineChainDriver {
+        |  object ChainHelper {
+        |    @inline final def step1(x: Int): Int = x + 1
+        |    @inline final def step2(x: Int): Int = step1(x) * 2
+        |    @inline final def step3(x: Int): Int = step2(x) + step1(x)
+        |    @inline final def compute(x: Int): Int = step3(x) + step2(x)
+        |  }
+        |  def run(): AnyRef = {
+        |    var sum = 0
+        |    var i = 0
+        |    while (i < 10000) {
+        |      sum += ChainHelper.compute(i)
+        |      i += 1
+        |    }
+        |    Integer.valueOf(sum)
+        |  }
+        |}
+      """.stripMargin, "InlineChainDriver")
   }
 
-  @Benchmark
-  def stock(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "inlineFinal" => "InlineFinalRunner"
-      case "inlineChain" => "InlineChainRunner"
-    }
-    val cls = stockLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
-  }
-
-  @Benchmark
-  def goron(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "inlineFinal" => "InlineFinalRunner"
-      case "inlineChain" => "InlineChainRunner"
-    }
-    val cls = optimizedLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
-  }
+  @Benchmark def stockInlineFinal(bh: Blackhole): Unit = bh.consume(inlineFinal.stock())
+  @Benchmark def goronInlineFinal(bh: Blackhole): Unit = bh.consume(inlineFinal.goron())
+  @Benchmark def stockInlineChain(bh: Blackhole): Unit = bh.consume(inlineChain.stock())
+  @Benchmark def goronInlineChain(bh: Blackhole): Unit = bh.consume(inlineChain.goron())
 }

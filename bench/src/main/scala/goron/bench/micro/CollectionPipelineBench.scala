@@ -19,60 +19,30 @@ import java.util.concurrent.TimeUnit
 @Fork(value = 2, jvmArgs = Array("-Xmx2g"))
 class CollectionPipelineBench {
 
-  private var stockLoader: ClassLoader = _
-  private var optimizedLoader: ClassLoader = _
-
-  private val mapFilterSumCode =
-    """object MapFilterSumRunner {
-      |  def run(n: Int): Int = {
-      |    (1 to n).map(_ * 2).filter(_ > 50).sum
-      |  }
-      |}
-      |""".stripMargin
-
-  private val foldLeftCode =
-    """object FoldLeftRunner {
-      |  def run(n: Int): Int = {
-      |    (1 to n).foldLeft(0) { (acc, x) =>
-      |      acc + x * x
-      |    }
-      |  }
-      |}
-      |""".stripMargin
-
-  @Param(Array("mapFilterSum", "foldLeft"))
-  var variant: String = _
+  private var mapFilterSum: BenchmarkUtils.DriverSetup = _
+  private var foldLeft: BenchmarkUtils.DriverSetup = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val code = variant match {
-      case "mapFilterSum" => mapFilterSumCode
-      case "foldLeft"     => foldLeftCode
-    }
-    val (stock, optimized) = BenchmarkUtils.compileAndOptimize(code)
-    stockLoader = BenchmarkUtils.classLoaderFromBytes(stock)
-    optimizedLoader = BenchmarkUtils.classLoaderFromBytes(optimized)
+    mapFilterSum = BenchmarkUtils.setupDriver(
+      """object MapFilterSumDriver {
+        |  def run(): AnyRef = {
+        |    Integer.valueOf((1 to 1000).map(_ * 2).filter(_ > 50).sum)
+        |  }
+        |}
+      """.stripMargin, "MapFilterSumDriver")
+
+    foldLeft = BenchmarkUtils.setupDriver(
+      """object FoldLeftDriver {
+        |  def run(): AnyRef = {
+        |    Integer.valueOf((1 to 1000).foldLeft(0) { (acc, x) => acc + x * x })
+        |  }
+        |}
+      """.stripMargin, "FoldLeftDriver")
   }
 
-  @Benchmark
-  def stock(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "mapFilterSum" => "MapFilterSumRunner"
-      case "foldLeft"     => "FoldLeftRunner"
-    }
-    val cls = stockLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(1000)))
-  }
-
-  @Benchmark
-  def goron(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "mapFilterSum" => "MapFilterSumRunner"
-      case "foldLeft"     => "FoldLeftRunner"
-    }
-    val cls = optimizedLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(1000)))
-  }
+  @Benchmark def stockMapFilterSum(bh: Blackhole): Unit = bh.consume(mapFilterSum.stock())
+  @Benchmark def goronMapFilterSum(bh: Blackhole): Unit = bh.consume(mapFilterSum.goron())
+  @Benchmark def stockFoldLeft(bh: Blackhole): Unit = bh.consume(foldLeft.stock())
+  @Benchmark def goronFoldLeft(bh: Blackhole): Unit = bh.consume(foldLeft.goron())
 }

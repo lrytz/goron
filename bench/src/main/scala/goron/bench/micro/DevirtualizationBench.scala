@@ -19,93 +19,59 @@ import java.util.concurrent.TimeUnit
 @Fork(value = 2, jvmArgs = Array("-Xmx2g"))
 class DevirtualizationBench {
 
-  private var stockLoader: ClassLoader = _
-  private var optimizedLoader: ClassLoader = _
-
-  private val singleImplCode =
-    """abstract class Shape {
-      |  def area(size: Int): Int
-      |}
-      |
-      |final class Square extends Shape {
-      |  override def area(size: Int): Int = size * size
-      |}
-      |
-      |object SingleImplRunner {
-      |  def run(n: Int): Int = {
-      |    val shape: Shape = new Square
-      |    var sum = 0
-      |    var i = 0
-      |    while (i < n) {
-      |      sum += shape.area(i % 100)
-      |      i += 1
-      |    }
-      |    sum
-      |  }
-      |}
-      |""".stripMargin
-
-  private val sealedHierarchyCode =
-    """sealed trait Expr
-      |final case class Lit(value: Int) extends Expr
-      |final case class Add(a: Expr, b: Expr) extends Expr
-      |final case class Mul(a: Expr, b: Expr) extends Expr
-      |
-      |object ExprEval {
-      |  def eval(e: Expr): Int = e match {
-      |    case Lit(v)    => v
-      |    case Add(a, b) => eval(a) + eval(b)
-      |    case Mul(a, b) => eval(a) * eval(b)
-      |  }
-      |}
-      |
-      |object SealedRunner {
-      |  def run(n: Int): Int = {
-      |    val expr = Add(Mul(Lit(2), Lit(3)), Add(Lit(4), Lit(5)))
-      |    var sum = 0
-      |    var i = 0
-      |    while (i < n) {
-      |      sum += ExprEval.eval(expr)
-      |      i += 1
-      |    }
-      |    sum
-      |  }
-      |}
-      |""".stripMargin
-
-  @Param(Array("singleImpl", "sealedHierarchy"))
-  var variant: String = _
+  private var singleImpl: BenchmarkUtils.DriverSetup = _
+  private var sealedHierarchy: BenchmarkUtils.DriverSetup = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val code = variant match {
-      case "singleImpl"      => singleImplCode
-      case "sealedHierarchy" => sealedHierarchyCode
-    }
-    val (stock, optimized) = BenchmarkUtils.compileAndOptimize(code)
-    stockLoader = BenchmarkUtils.classLoaderFromBytes(stock)
-    optimizedLoader = BenchmarkUtils.classLoaderFromBytes(optimized)
+    singleImpl = BenchmarkUtils.setupDriver(
+      """abstract class Shape {
+        |  def area(size: Int): Int
+        |}
+        |final class Square extends Shape {
+        |  override def area(size: Int): Int = size * size
+        |}
+        |object SingleImplDriver {
+        |  def run(): AnyRef = {
+        |    val shape: Shape = new Square
+        |    var sum = 0
+        |    var i = 0
+        |    while (i < 10000) {
+        |      sum += shape.area(i % 100)
+        |      i += 1
+        |    }
+        |    Integer.valueOf(sum)
+        |  }
+        |}
+      """.stripMargin, "SingleImplDriver")
+
+    sealedHierarchy = BenchmarkUtils.setupDriver(
+      """sealed trait Expr
+        |final case class Lit(value: Int) extends Expr
+        |final case class Add(a: Expr, b: Expr) extends Expr
+        |final case class Mul(a: Expr, b: Expr) extends Expr
+        |object SealedDriver {
+        |  def eval(e: Expr): Int = e match {
+        |    case Lit(v)    => v
+        |    case Add(a, b) => eval(a) + eval(b)
+        |    case Mul(a, b) => eval(a) * eval(b)
+        |  }
+        |  def run(): AnyRef = {
+        |    val expr = Add(Mul(Lit(2), Lit(3)), Add(Lit(4), Lit(5)))
+        |    var sum = 0
+        |    var i = 0
+        |    while (i < 10000) {
+        |      sum += eval(expr)
+        |      i += 1
+        |    }
+        |    Integer.valueOf(sum)
+        |  }
+        |}
+      """.stripMargin, "SealedDriver")
   }
 
-  @Benchmark
-  def stock(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "singleImpl"      => "SingleImplRunner"
-      case "sealedHierarchy" => "SealedRunner"
-    }
-    val cls = stockLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
-  }
-
-  @Benchmark
-  def goron(bh: Blackhole): Unit = {
-    val runner = variant match {
-      case "singleImpl"      => "SingleImplRunner"
-      case "sealedHierarchy" => "SealedRunner"
-    }
-    val cls = optimizedLoader.loadClass(runner)
-    val method = cls.getMethod("run", classOf[Int])
-    bh.consume(method.invoke(null, Integer.valueOf(10000)))
-  }
+  @Benchmark def stockSingleImpl(bh: Blackhole): Unit = bh.consume(singleImpl.stock())
+  @Benchmark def goronSingleImpl(bh: Blackhole): Unit = bh.consume(singleImpl.goron())
+  @Benchmark def stockSealedHierarchy(bh: Blackhole): Unit = bh.consume(sealedHierarchy.stock())
+  @Benchmark def goronSealedHierarchy(bh: Blackhole): Unit = bh.consume(sealedHierarchy.goron())
 }
