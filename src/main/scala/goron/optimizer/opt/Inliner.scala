@@ -824,13 +824,16 @@ class Inliner[PP <: PostProcessor](val postProcessor: PP) {
     // used later, but computed here
     var skipReceiverNullCheck = receiverKnownNotNull || isStatic
 
+    val needsReceiverCast = callsiteCallee.isDevirtualized
+
     val paramSizes = (if (isStatic) Iterator.empty else Iterator(1)) ++ calleeParamTypes.iterator.map(_.getSize)
     for (paramSize <- paramSizes) {
       val min = f.aliasesOf(callsiteStackSlot).iterator.min
       if (calleeParamSlot == 0 && !isStatic && min == 0)
         skipReceiverNullCheck = true // no need to null-check `this`
       val isWritten = writtenLocals(calleeParamSlot) || paramSize == 2 && writtenLocals(calleeParamSlot + 1)
-      if (min < numLocals && !isWritten) {
+      val forceNewLocal = needsReceiverCast && calleeParamSlot == 0
+      if (min < numLocals && !isWritten && !forceNewLocal) {
         calleeParamLocals(calleeParamSlot) = min
       } else {
         calleeParamLocals(calleeParamSlot) = nextLocalIndex
@@ -865,6 +868,8 @@ class Inliner[PP <: PostProcessor](val postProcessor: PP) {
     val numCallsiteLocals = BackendUtils.maxLocals(callsiteMethod)
     calleeParamSlot = 0
     if (!isStatic) {
+      if (needsReceiverCast)
+        argStores.add(new TypeInsnNode(CHECKCAST, calleeDeclarationClass.internalName))
       def addNullCheck(): Unit = {
         val nonNullLabel = newLabelNode
         argStores.add(new JumpInsnNode(IFNONNULL, nonNullLabel))

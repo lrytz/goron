@@ -102,7 +102,7 @@ class InlinerHeuristics[PP <: PostProcessor](val postProcessor: PP) {
                 _,
                 _,
                 _,
-                Right(Callee(callee, _, _, _, _, _, _, callsiteWarning)),
+                Right(Callee(callee, _, _, _, _, _, _, callsiteWarning, _)),
                 _,
                 _,
                 _,

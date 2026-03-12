@@ -166,16 +166,18 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
                 .methodNode(preciseOwner, call.name, call.desc): Either[OptimizerWarning, (MethodNode, InternalName)]
               // Devirtualize: if the resolved method is abstract but has a single concrete
               // implementation (from closed-world analysis), re-resolve to that implementation.
-              (method, declarationClass) <- (
+              (method, declarationClass, devirtualized) <- (
                 if (isAbstractMethod(method0)) {
                   postProcessor.singleImplAbstractMethods.get((declarationClass0, call.name, call.desc)) match {
                     case Some(concreteClass) =>
-                      byteCodeRepository.methodNode(concreteClass, call.name, call.desc)
+                      byteCodeRepository.methodNode(concreteClass, call.name, call.desc).map {
+                        case (m, dc) => (m, dc, true)
+                      }
                     case None =>
-                      Right((method0, declarationClass0))
+                      Right((method0, declarationClass0, false))
                   }
-                } else Right((method0, declarationClass0))
-              ): Either[OptimizerWarning, (MethodNode, InternalName)]
+                } else Right((method0, declarationClass0, false))
+              ): Either[OptimizerWarning, (MethodNode, InternalName, Boolean)]
               (declarationClassNode, calleeSourceFilePath) <- byteCodeRepository.classNodeAndSourceFilePath(
                 declarationClass
               ): Either[OptimizerWarning, (ClassNode, Option[String])]
@@ -192,7 +194,8 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
                 annotatedInline = annotatedInline,
                 annotatedNoInline = annotatedNoInline,
                 samParamTypes = info.samParamTypes,
-                calleeInfoWarning = warning
+                calleeInfoWarning = warning,
+                isDevirtualized = devirtualized
               )
             }
           }
@@ -492,7 +495,11 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
       annotatedInline: Boolean,
       annotatedNoInline: Boolean,
       samParamTypes: IntMap[ClassBType],
-      calleeInfoWarning: Option[CalleeInfoWarning]
+      calleeInfoWarning: Option[CalleeInfoWarning],
+      /** True when this callee was resolved via single-impl devirtualization of an abstract method.
+        * The inliner must insert a CHECKCAST for the receiver to the calleeDeclarationClass.
+        */
+      isDevirtualized: Boolean = false
   ) {
     override def toString = s"Callee($calleeDeclarationClass.${callee.name})"
 
