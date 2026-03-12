@@ -82,6 +82,9 @@ object BenchmarkUtils {
 
   /** Run goron optimization on a set of jars with given entry points. Returns the optimized jar.
     *
+    * Results are cached to disk keyed by input jars, entry points, and goron's own classpath
+    * fingerprint, so repeated calls (e.g., across JMH forks) reuse the previous result.
+    *
     * Goron runs in a forked JVM process to avoid polluting the benchmark JVM's JIT compiler
     * with goron's own classes (which would add thousands of extra JIT compilations and skew results).
     */
@@ -89,25 +92,30 @@ object BenchmarkUtils {
       jars: Array[File],
       entryPoints: List[String]
   ): File = {
-    val outputJar = File.createTempFile("goron-bench-optimized-", ".jar")
-    val classpath = System.getProperty("java.class.path")
-    val javaHome = System.getProperty("java.home")
-    val java = new File(javaHome, "bin/java").getAbsolutePath
+    val key = sha256(
+      goronFingerprint + "\u0000" +
+        jars.map(_.getAbsolutePath).sorted.mkString("\u0000") +
+        "\u0000\u0000" + entryPoints.sorted.mkString("\u0000")
+    )
+    cacheFile(key, "-goron.jar", { out =>
+      val classpath = System.getProperty("java.class.path")
+      val javaHome = System.getProperty("java.home")
+      val java = new File(javaHome, "bin/java").getAbsolutePath
 
-    val cmd = ListBuffer(java, "-cp", classpath, "goron.GoronCli")
-    for (jar <- jars) { cmd += "--input"; cmd += jar.getAbsolutePath }
-    cmd += "--output"; cmd += outputJar.getAbsolutePath
-    for (ep <- entryPoints) { cmd += "--entry"; cmd += ep }
-    cmd += "--verbose"
+      val cmd = ListBuffer(java, "-cp", classpath, "goron.GoronCli")
+      for (jar <- jars) { cmd += "--input"; cmd += jar.getAbsolutePath }
+      cmd += "--output"; cmd += out.getAbsolutePath
+      for (ep <- entryPoints) { cmd += "--entry"; cmd += ep }
+      cmd += "--verbose"
 
-    import scala.jdk.CollectionConverters._
-    val pb = new ProcessBuilder(cmd.asJava)
-    pb.inheritIO()
-    val proc = pb.start()
-    val exitCode = proc.waitFor()
-    if (exitCode != 0)
-      throw new RuntimeException(s"Goron subprocess failed with exit code $exitCode")
-    outputJar
+      import scala.jdk.CollectionConverters._
+      val pb = new ProcessBuilder(cmd.asJava)
+      pb.inheritIO()
+      val proc = pb.start()
+      val exitCode = proc.waitFor()
+      if (exitCode != 0)
+        throw new RuntimeException(s"Goron subprocess failed with exit code $exitCode")
+    })
   }
 
   /** Compile Scala source code against specific jars.
@@ -217,15 +225,7 @@ object BenchmarkUtils {
       } finally jf.close()
     }
 
-    val goronKey = sha256(
-      goronFingerprint + "\u0000" +
-        allInputJars.map(_.getAbsolutePath).sorted.mkString("\u0000") +
-        "\u0000\u0000" + entryPoints.sorted.mkString("\u0000")
-    )
-    val optimizedJar = cacheFile(goronKey, "-goron.jar", { out =>
-      val result = optimizeJars(allInputJars, entryPoints)
-      java.nio.file.Files.move(result.toPath, out.toPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-    })
+    val optimizedJar = optimizeJars(allInputJars, entryPoints)
 
     val goronCl = classLoaderFromJars(Array(optimizedJar))
     val (gm, gr) = loadDriver(goronCl, moduleName)

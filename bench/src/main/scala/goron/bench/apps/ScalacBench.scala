@@ -59,7 +59,7 @@ class ScalacBench {
   def teardown(): Unit = {
     deleteRecursive(outputDir)
     if (sourceDir != null) deleteRecursive(sourceDir)
-    if (optimizedJar != null) optimizedJar.delete()
+    // Don't delete optimizedJar — it lives in the shared cache
   }
 
   @TearDown(Level.Invocation)
