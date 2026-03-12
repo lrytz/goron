@@ -53,6 +53,16 @@ would shrink objects and reduce initialization cost. Requires a whole-program an
 all retained methods for GETFIELD/GETSTATIC instructions, then strip fields (and their
 writes) that have no readers.
 
+### Java enum classes broken after optimization
+
+Goron's optimization breaks Java enum classes. `EnumSet.noneOf(cls)` throws
+`ClassCastException: class xsbti.UseScope not an enum` when `cls` was loaded from a
+goron-optimized jar. Likely goron strips or modifies enum metadata (e.g., the `ACC_ENUM`
+access flag, the `values()` / `valueOf()` synthetic methods, or the superclass
+`java.lang.Enum`). Discovered via `Scala3Bench` where the Scala 3 compiler uses
+`EnumSet.of(UseScope.Default)` during initialization. Current workaround: add enum classes
+as entry points so they're retained as-is.
+
 ### Improve error handling in LUB computation and external class loading
 
 Silent catch-all handlers mask real errors:
@@ -92,10 +102,14 @@ understand the resulting code. Is it ideal, or are there further optimization op
 (e.g., eliminating remaining allocations, fusing collection operations, scalar-replacing
 intermediate collections)?
 
-### Benchmark Scala 3 compiler (3.8.2)
-
-Add a benchmark that optimizes and runs the Scala 3 compiler. Goron already works on any
-JVM bytecode, so Scala 3 compiled jars can be optimized without Scala 3 support in goron
-itself. This would show whether goron's link-time optimizations benefit Scala 3 code.
-
 ### Scala 3 support
+
+Check what needs to change for goron to fully support Scala 3 bytecode. Scala 3 classfiles
+don't have the `ScalaInlineInfo` attribute that goron relies on for inline heuristics
+(which methods are final, annotated `@inline`, closures, etc.). Without it, goron falls back
+to reading access flags only, missing opportunities. Investigate whether Scala 3 has an
+equivalent mechanism, or whether goron needs to derive inline info from the classfile structure
+(e.g., detecting SAM closures, final methods, bridge methods) without the attribute.
+
+Investigate what goron does in the Scala3CompilerBench. Performance seems exactly the same with
+and without.
