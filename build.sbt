@@ -16,6 +16,7 @@ lazy val goron = (project in file("."))
     )),
     libraryDependencies ++= Seq(
       "org.scala-lang.modules" % "scala-asm" % "9.9.0-scala-1",
+      "org.benf" % "cfr" % "0.152",
       "org.scalameta" %% "munit" % "1.2.4" % Test,
       "org.scala-lang" % "scala-compiler" % scalaVersion.value % Test,
     ),

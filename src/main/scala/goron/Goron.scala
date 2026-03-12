@@ -10,6 +10,7 @@ package goron
 import goron.optimizer._
 import goron.optimizer.opt.InlineInfoAttributePrototype
 
+import scala.jdk.CollectionConverters._
 import scala.tools.asm
 
 object Goron {
@@ -91,6 +92,12 @@ object Goron {
       )
     }
 
+    // Snapshot method sizes before optimization
+    val showMethodSizes = config.optLogInline.isDefined || config.verbose
+    val sizesBefore = if (showMethodSizes) {
+      snapshotMethodSizes(reachableClassNodes)
+    } else Map.empty[String, Int]
+
     // Run global optimizations (inlining, closure optimization) on reachable classes
     if (config.optInlinerEnabled || config.optClosureInvocations) {
       log("Inlining and closure optimization...")
@@ -107,6 +114,12 @@ object Goron {
         pp.localOptimizations(cn)
       }
       log(s"  ${reachableClassNodes.size} classes optimized (${elapsed(phaseStart)})")
+    }
+
+    // Print method size change summary
+    if (showMethodSizes) {
+      val sizesAfter = snapshotMethodSizes(reachableClassNodes)
+      printMethodSizeChanges(sizesBefore, sizesAfter)
     }
 
     var strippedMethods = 0
@@ -147,6 +160,35 @@ object Goron {
         s", ${formatSize(inputSize)} → ${formatSize(outputSize)}" +
         s" (${elapsed(totalStart)})"
     )
+  }
+
+  private def snapshotMethodSizes(classNodes: Seq[asm.tree.ClassNode]): Map[String, Int] = {
+    val sizes = Map.newBuilder[String, Int]
+    for {
+      cn <- classNodes
+      mn <- cn.methods.asScala
+    } {
+      val key = s"${cn.name}.${mn.name} ${mn.desc}"
+      sizes += key -> mn.instructions.size()
+    }
+    sizes.result()
+  }
+
+  private def printMethodSizeChanges(before: Map[String, Int], after: Map[String, Int]): Unit = {
+    val changes = for {
+      (key, sizeBefore) <- before.toList
+      sizeAfter <- after.get(key)
+      if sizeAfter != sizeBefore
+    } yield (key, sizeBefore, sizeAfter)
+
+    if (changes.isEmpty) return
+
+    val sorted = changes.sortBy { case (_, b, a) => -(a - b) }.take(20)
+    println("=== Method size changes (top 20) ===")
+    for ((key, sizeBefore, sizeAfter) <- sorted) {
+      val pct = if (sizeBefore == 0) "N/A" else f"${(sizeAfter - sizeBefore) * 100.0 / sizeBefore}%+.0f%%"
+      println(s"  $key: $sizeBefore → $sizeAfter insns ($pct)")
+    }
   }
 
   private def formatSize(bytes: Long): String = {

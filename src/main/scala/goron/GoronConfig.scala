@@ -26,5 +26,6 @@ case class GoronConfig(
     // Link-time features
     eliminateDeadCode: Boolean = true,
     closedWorld: Boolean = true,
-    verbose: Boolean = false
+    verbose: Boolean = false,
+    optLogInline: Option[String] = None
 )

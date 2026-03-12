@@ -24,6 +24,7 @@ object GoronCli {
     var optInlinerEnabled = true
     var optClosureInvocations = true
     var eliminateDeadCode = true
+    var optLogInline: Option[String] = None
 
     var remaining = args
     while (remaining.nonEmpty) {
@@ -37,6 +38,16 @@ object GoronCli {
         case "--entry" :: entry :: rest =>
           entryPoints = entryPoints :+ entry
           remaining = rest
+        case "--log-inline" :: rest =>
+          // Check if next arg is a filter pattern (not another flag)
+          rest match {
+            case next :: tail if !next.startsWith("--") =>
+              optLogInline = Some(next)
+              remaining = tail
+            case _ =>
+              optLogInline = Some("_")
+              remaining = rest
+          }
         case "--no-inline" :: rest =>
           optInlinerEnabled = false
           optClosureInvocations = false
@@ -78,19 +89,21 @@ object GoronCli {
         verbose = verbose,
         optInlinerEnabled = optInlinerEnabled,
         optClosureInvocations = optClosureInvocations,
-        eliminateDeadCode = eliminateDeadCode
+        eliminateDeadCode = eliminateDeadCode,
+        optLogInline = optLogInline
       )
     )
   }
 
   private def printUsage(): Unit = {
     System.err.println("""Usage: goron [options]
-        |  --input <jar>    Input jar file (can be specified multiple times)
-        |  --output <jar>   Output jar file
-        |  --entry <class>  Entry point class (internal name, can be repeated)
-        |  --no-inline      Disable inlining
-        |  --no-dce         Disable dead code elimination
-        |  --verbose        Verbose output
-        |  --help           Show this help""".stripMargin)
+        |  --input <jar>          Input jar file (can be specified multiple times)
+        |  --output <jar>         Output jar file
+        |  --entry <class>        Entry point class (internal name, can be repeated)
+        |  --log-inline [filter]  Log inline decisions (default: all; or a class/method prefix)
+        |  --no-inline            Disable inlining
+        |  --no-dce               Disable dead code elimination
+        |  --verbose              Verbose output
+        |  --help                 Show this help""".stripMargin)
   }
 }

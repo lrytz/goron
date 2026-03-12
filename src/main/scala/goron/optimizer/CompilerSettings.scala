@@ -81,7 +81,7 @@ object CompilerSettings {
     val optWarningEmitAtInlineFailed = config.optWarningEmitAtInlineFailed
     val optWarningEmitAnyInlineFailed = false
 
-    val optLogInline: Option[String] = None
+    val optLogInline: Option[String] = config.optLogInline
     val optTrace: Option[String] = None
   }
 }
