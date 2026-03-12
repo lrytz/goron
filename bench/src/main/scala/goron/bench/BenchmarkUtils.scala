@@ -34,6 +34,20 @@ object BenchmarkUtils {
 
   private def sha256(s: String): String = sha256(s.getBytes("UTF-8"))
 
+  /** Fingerprint of the goron optimizer itself (classpath modification times).
+    * Changes when goron is recompiled, invalidating cached optimized jars.
+    */
+  private lazy val goronFingerprint: String = {
+    val cp = System.getProperty("java.class.path", "")
+    val entries = cp.split(java.io.File.pathSeparatorChar).sorted
+    val sb = new StringBuilder
+    for (e <- entries) {
+      val f = new File(e)
+      sb.append(e).append('\u0000').append(f.lastModified()).append('\u0000')
+    }
+    sha256(sb.toString)
+  }
+
   /** Produce a file and cache it. The `produce` function should create the file at the given path.
     * If the cached file already exists, returns it immediately.
     */
@@ -84,6 +98,7 @@ object BenchmarkUtils {
     for (jar <- jars) { cmd += "--input"; cmd += jar.getAbsolutePath }
     cmd += "--output"; cmd += outputJar.getAbsolutePath
     for (ep <- entryPoints) { cmd += "--entry"; cmd += ep }
+    cmd += "--verbose"
 
     import scala.jdk.CollectionConverters._
     val pb = new ProcessBuilder(cmd.asJava)
@@ -203,7 +218,8 @@ object BenchmarkUtils {
     }
 
     val goronKey = sha256(
-      allInputJars.map(_.getAbsolutePath).sorted.mkString("\u0000") +
+      goronFingerprint + "\u0000" +
+        allInputJars.map(_.getAbsolutePath).sorted.mkString("\u0000") +
         "\u0000\u0000" + entryPoints.sorted.mkString("\u0000")
     )
     val optimizedJar = cacheFile(goronKey, "-goron.jar", { out =>
