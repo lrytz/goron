@@ -162,8 +162,20 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
 
           val callee: Either[OptimizerWarning, Callee] = {
             for {
-              (method, declarationClass) <- byteCodeRepository
+              (method0, declarationClass0) <- byteCodeRepository
                 .methodNode(preciseOwner, call.name, call.desc): Either[OptimizerWarning, (MethodNode, InternalName)]
+              // Devirtualize: if the resolved method is abstract but has a single concrete
+              // implementation (from closed-world analysis), re-resolve to that implementation.
+              (method, declarationClass) <- (
+                if (isAbstractMethod(method0)) {
+                  postProcessor.singleImplAbstractMethods.get((declarationClass0, call.name, call.desc)) match {
+                    case Some(concreteClass) =>
+                      byteCodeRepository.methodNode(concreteClass, call.name, call.desc)
+                    case None =>
+                      Right((method0, declarationClass0))
+                  }
+                } else Right((method0, declarationClass0))
+              ): Either[OptimizerWarning, (MethodNode, InternalName)]
               (declarationClassNode, calleeSourceFilePath) <- byteCodeRepository.classNodeAndSourceFilePath(
                 declarationClass
               ): Either[OptimizerWarning, (ClassNode, Option[String])]

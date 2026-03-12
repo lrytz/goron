@@ -26,7 +26,12 @@ object ClosedWorldAnalysis {
       /** Set of classes that are effectively final (no subclasses) */
       effectivelyFinalClasses: Set[String],
       /** Set of (owner, name, desc) for methods that are effectively final */
-      effectivelyFinalMethods: Set[(String, String, String)]
+      effectivelyFinalMethods: Set[(String, String, String)],
+      /** For abstract/interface methods with exactly one concrete implementation:
+        * (abstractOwner, name, desc) → concreteImplClass.
+        * Enables devirtualization of calls to abstract methods.
+        */
+      singleImplAbstractMethods: Map[(String, String, String), String] = Map.empty
   )
 
   /** Analyze the class hierarchy to determine effectively-final classes and methods. External classes (JDK, etc.) are
@@ -59,7 +64,24 @@ object ClosedWorldAnalysis {
       }
     }
 
-    ClosedWorldResult(effectivelyFinalClasses, effectivelyFinalMethods.toSet)
+    // For abstract methods, find cases where there's exactly one concrete
+    // implementation in the entire subclass hierarchy. This enables
+    // devirtualization: calls to the abstract method can be resolved to
+    // the single concrete implementation.
+    val singleImplAbstractMethods = mutable.Map.empty[(String, String, String), String]
+    for ((name, cn) <- classByName if cn.methods != null) {
+      cn.methods.asScala.foreach { mn =>
+        if (isAbstractMethod(mn) && !isStaticMethod(mn) && !isPrivateMethod(mn)) {
+          val key = (name, mn.name, mn.desc)
+          findSingleConcreteImpl(name, mn.name, mn.desc, classByName, subclasses) match {
+            case Some(implClass) => singleImplAbstractMethods += key -> implClass
+            case None            =>
+          }
+        }
+      }
+    }
+
+    ClosedWorldResult(effectivelyFinalClasses, effectivelyFinalMethods.toSet, singleImplAbstractMethods.toMap)
   }
 
   private def isFinalClass(cn: ClassNode): Boolean =
@@ -91,6 +113,55 @@ object ClosedWorldAnalysis {
 
     // Check if any transitive subclass overrides this method
     !hasOverrideInSubclasses(className, mn.name, mn.desc, classByName, subclasses)
+  }
+
+  private def isAbstractMethod(mn: MethodNode): Boolean =
+    (mn.access & Opcodes.ACC_ABSTRACT) != 0
+
+  /** Find the single concrete implementation of an abstract method in the subclass hierarchy.
+    * Returns Some(className) if exactly one class provides a concrete implementation
+    * and no subclass of that class overrides it. Returns None otherwise.
+    */
+  private def findSingleConcreteImpl(
+      className: String,
+      methodName: String,
+      methodDesc: String,
+      classByName: Map[String, ClassNode],
+      subclasses: Map[String, Set[String]]
+  ): Option[String] = {
+    val impls = mutable.Set.empty[String]
+    collectConcreteImpls(className, methodName, methodDesc, classByName, subclasses, impls)
+    if (impls.size == 1) Some(impls.head) else None
+  }
+
+  /** Collect all classes in the transitive subclass hierarchy that provide a concrete
+    * implementation of the given method (name, desc). Stops collecting early if more
+    * than one implementation is found.
+    */
+  private def collectConcreteImpls(
+      className: String,
+      methodName: String,
+      methodDesc: String,
+      classByName: Map[String, ClassNode],
+      subclasses: Map[String, Set[String]],
+      result: mutable.Set[String]
+  ): Unit = {
+    if (result.size > 1) return
+    for (sub <- subclasses.getOrElse(className, Set.empty)) {
+      classByName.get(sub).foreach { subNode =>
+        val hasImpl = subNode.methods.asScala.exists { m =>
+          m.name == methodName && m.desc == methodDesc && !isAbstractMethod(m)
+        }
+        if (hasImpl) {
+          result += sub
+          // Still recurse: a further subclass might override with a different impl
+          collectConcreteImpls(sub, methodName, methodDesc, classByName, subclasses, result)
+        } else {
+          // No impl here, keep searching deeper
+          collectConcreteImpls(sub, methodName, methodDesc, classByName, subclasses, result)
+        }
+      }
+    }
   }
 
   private def hasOverrideInSubclasses(

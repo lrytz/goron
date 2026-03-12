@@ -33,13 +33,6 @@ object Goron {
       JarClasspath.fromClassEntries(classEntries.map(e => (e.name, e.bytes)))
     )
 
-    // Create the optimizer pipeline
-    val settings = CompilerSettings.fromConfig(config)
-    val reporter =
-      if (config.verbose) BackendReporting.ConsoleReporter
-      else BackendReporting.SilentReporter
-    val pp = new PostProcessor(settings, classpath, reporter)
-
     // Parse all class entries into ClassNodes (using ClassNode1 for LabelNode1 support)
     log("Parsing class files...")
     phaseStart = System.nanoTime()
@@ -69,6 +62,29 @@ object Goron {
       classNodes.map(_.name).toSet
     }
 
+    val reachableClassNodes = classNodes.filter(cn => reachableNames.contains(cn.name))
+
+    // Closed-world analysis: mark effectively-final classes/methods before inlining
+    val singleImplMethods = if (config.closedWorld) {
+      log("Closed-world analysis...")
+      phaseStart = System.nanoTime()
+      val closedWorld = ClosedWorldAnalysis.buildHierarchy(hierarchy)
+      ClosedWorldAnalysis.applyToClassNodes(reachableClassNodes, closedWorld)
+      log(
+        s"  ${closedWorld.effectivelyFinalClasses.size} final classes, " +
+          s"${closedWorld.effectivelyFinalMethods.size} final methods, " +
+          s"${closedWorld.singleImplAbstractMethods.size} single-impl abstract methods (${elapsed(phaseStart)})"
+      )
+      closedWorld.singleImplAbstractMethods
+    } else Map.empty[(String, String, String), String]
+
+    // Create the optimizer pipeline
+    val settings = CompilerSettings.fromConfig(config)
+    val reporter =
+      if (config.verbose) BackendReporting.ConsoleReporter
+      else BackendReporting.SilentReporter
+    val pp = new PostProcessor(settings, classpath, reporter, singleImplMethods)
+
     // Add reachable classes as "compiling" (inliner will optimize these),
     // unreachable classes as "parsed" (available for type resolution only)
     for (cn <- classNodes) {
@@ -76,20 +92,6 @@ object Goron {
         pp.byteCodeRepository.add(cn, Some("goron"))
       else
         pp.byteCodeRepository.add(cn, None)
-    }
-
-    val reachableClassNodes = classNodes.filter(cn => reachableNames.contains(cn.name))
-
-    // Closed-world analysis: mark effectively-final classes/methods before inlining
-    if (config.closedWorld) {
-      log("Closed-world analysis...")
-      phaseStart = System.nanoTime()
-      val closedWorld = ClosedWorldAnalysis.buildHierarchy(hierarchy)
-      ClosedWorldAnalysis.applyToClassNodes(reachableClassNodes, closedWorld)
-      log(
-        s"  ${closedWorld.effectivelyFinalClasses.size} final classes, " +
-          s"${closedWorld.effectivelyFinalMethods.size} final methods (${elapsed(phaseStart)})"
-      )
     }
 
     // Snapshot method sizes before optimization
@@ -183,11 +185,12 @@ object Goron {
 
     if (changes.isEmpty) return
 
-    val sorted = changes.sortBy { case (_, b, a) => -(a - b) }.take(20)
-    println("=== Method size changes (top 20) ===")
+    val sorted = changes.sortBy { case (_, _, a) => -a }.take(20)
+    println("=== Method size changes (top 20 by final size) ===")
     for ((key, sizeBefore, sizeAfter) <- sorted) {
-      val pct = if (sizeBefore == 0) "N/A" else f"${(sizeAfter - sizeBefore) * 100.0 / sizeBefore}%+.0f%%"
-      println(s"  $key: $sizeBefore → $sizeAfter insns ($pct)")
+      val delta = sizeAfter - sizeBefore
+      val sign = if (delta >= 0) "+" else ""
+      println(s"  $key: $sizeBefore → $sizeAfter insns ($sign$delta)")
     }
   }
 

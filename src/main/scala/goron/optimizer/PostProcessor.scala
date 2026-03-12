@@ -19,7 +19,12 @@ import scala.tools.asm.tree.ClassNode
 final class PostProcessor(
     settings: CompilerSettings,
     classpath: goron.Classpath,
-    reporter: BackendReporting.Reporter
+    reporter: BackendReporting.Reporter,
+    /** For abstract/interface methods with exactly one concrete implementation:
+      * (abstractOwner, name, desc) → concreteImplClass.
+      * Populated by closed-world analysis; enables devirtualization in the call graph.
+      */
+    val singleImplAbstractMethods: Map[(String, String, String), String] = Map.empty
 ) {
 
   val bTypes: BTypes = new BTypes(settings, classpath, reporter)
