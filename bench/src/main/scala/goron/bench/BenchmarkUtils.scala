@@ -3,7 +3,8 @@ package goron.bench
 import goron._
 
 import java.io.File
-import java.net.{URL, URLClassLoader}
+import java.net.URLClassLoader
+import java.security.MessageDigest
 import scala.collection.mutable.ListBuffer
 import scala.reflect.io.VirtualDirectory
 import scala.tools.nsc.reporters.StoreReporter
@@ -13,8 +14,41 @@ import scala.tools.nsc.{Global, Settings}
   *
   * Provides dependency resolution via coursier, in-process Scala compilation,
   * goron optimization, and classloader isolation for stock vs optimized bytecode.
+  *
+  * All expensive work (resolution, compilation, optimization) is cached to disk
+  * so that JMH forks reuse artifacts instead of recomputing them.
   */
 object BenchmarkUtils {
+
+  private val cacheDir = {
+    val d = new File(System.getProperty("java.io.tmpdir"), "goron-bench-cache")
+    d.mkdirs()
+    d
+  }
+
+  private def sha256(bytes: Array[Byte]): String = {
+    val md = MessageDigest.getInstance("SHA-256")
+    md.update(bytes)
+    md.digest().take(12).map("%02x".format(_)).mkString
+  }
+
+  private def sha256(s: String): String = sha256(s.getBytes("UTF-8"))
+
+  /** Produce a file and cache it. The `produce` function should create the file at the given path.
+    * If the cached file already exists, returns it immediately.
+    */
+  private def cacheFile(key: String, suffix: String, produce: File => Unit): File = {
+    val cached = new File(cacheDir, key + suffix)
+    if (!cached.exists()) {
+      val tmp = new File(cacheDir, key + suffix + ".tmp")
+      produce(tmp)
+      if (!tmp.renameTo(cached)) {
+        // Another process may have written it concurrently
+        tmp.delete()
+      }
+    }
+    cached
+  }
 
   /** Resolve a Maven dependency and all its transitive dependencies via coursier.
     * Returns all jar files including transitive deps.
@@ -32,20 +66,32 @@ object BenchmarkUtils {
     files.toArray
   }
 
-  /** Run goron optimization on a set of jars with given entry points. Returns the optimized jar. */
+  /** Run goron optimization on a set of jars with given entry points. Returns the optimized jar.
+    *
+    * Goron runs in a forked JVM process to avoid polluting the benchmark JVM's JIT compiler
+    * with goron's own classes (which would add thousands of extra JIT compilations and skew results).
+    */
   def optimizeJars(
       jars: Array[File],
-      entryPoints: List[String],
-      config: GoronConfig = GoronConfig(inputJars = Nil, outputJar = "")
+      entryPoints: List[String]
   ): File = {
     val outputJar = File.createTempFile("goron-bench-optimized-", ".jar")
-    val fullConfig = config.copy(
-      inputJars = jars.map(_.getAbsolutePath).toList,
-      outputJar = outputJar.getAbsolutePath,
-      entryPoints = entryPoints,
-      verbose = false
-    )
-    Goron.run(fullConfig)
+    val classpath = System.getProperty("java.class.path")
+    val javaHome = System.getProperty("java.home")
+    val java = new File(javaHome, "bin/java").getAbsolutePath
+
+    val cmd = ListBuffer(java, "-cp", classpath, "goron.GoronCli")
+    for (jar <- jars) { cmd += "--input"; cmd += jar.getAbsolutePath }
+    cmd += "--output"; cmd += outputJar.getAbsolutePath
+    for (ep <- entryPoints) { cmd += "--entry"; cmd += ep }
+
+    import scala.jdk.CollectionConverters._
+    val pb = new ProcessBuilder(cmd.asJava)
+    pb.inheritIO()
+    val proc = pb.start()
+    val exitCode = proc.waitFor()
+    if (exitCode != 0)
+      throw new RuntimeException(s"Goron subprocess failed with exit code $exitCode")
     outputJar
   }
 
@@ -73,31 +119,9 @@ object BenchmarkUtils {
     new URLClassLoader(jars.map(_.toURI.toURL), ClassLoader.getSystemClassLoader.getParent)
   }
 
-  /** Create a ClassLoader that combines jar files with in-memory class bytes.
-    * Extra classes take priority over jar contents. Uses boot classloader as parent.
-    */
-  def classLoaderFromJarsAndBytes(jars: Array[File], extraClasses: Map[String, Array[Byte]]): ClassLoader = {
-    val parent = ClassLoader.getSystemClassLoader.getParent
-    val urlCl = new URLClassLoader(jars.map(_.toURI.toURL), parent)
-    new ClassLoader(urlCl) {
-      override def loadClass(name: String, resolve: Boolean): Class[_] = {
-        val already = findLoadedClass(name)
-        if (already != null) return already
-        extraClasses.get(name) match {
-          case Some(bytes) =>
-            val c = defineClass(name, bytes, 0, bytes.length)
-            if (resolve) resolveClass(c)
-            c
-          case None => super.loadClass(name, resolve)
-        }
-      }
-    }
-  }
-
-  /** Create a jar file from in-memory class bytes. */
-  def createJarFromBytes(classBytes: Map[String, Array[Byte]]): File = {
+  /** Write in-memory class bytes to a jar file at the given path. */
+  private def writeJarFromBytes(classBytes: Map[String, Array[Byte]], jarFile: File): Unit = {
     import java.util.jar.{JarEntry, JarOutputStream}
-    val jarFile = File.createTempFile("goron-bench-driver-", ".jar")
     val jos = new JarOutputStream(new java.io.FileOutputStream(jarFile))
     try {
       for ((className, bytes) <- classBytes) {
@@ -109,21 +133,18 @@ object BenchmarkUtils {
     } finally {
       jos.close()
     }
-    jarFile
   }
 
   /** Holds stock and goron driver handles for a benchmark.
     * Call `stock()` and `goron()` to invoke the driver's `run()` method.
-    * Goron optimization is lazy — it only runs when `goron()` is first called.
     */
   class DriverSetup(
       stockModule: AnyRef,
       stockRun: java.lang.reflect.Method,
-      goronInit: () => (AnyRef, java.lang.reflect.Method)
+      goronModule: AnyRef,
+      goronRun: java.lang.reflect.Method
   ) {
     def stock(): AnyRef = stockRun.invoke(stockModule)
-
-    private lazy val (goronModule, goronRun) = goronInit()
     def goron(): AnyRef = goronRun.invoke(goronModule)
   }
 
@@ -151,23 +172,49 @@ object BenchmarkUtils {
       resolve(s"org.scala-lang:scala-library:$scalaVersion")
     }
 
-    val driverBytes = compileAgainstJars(driverCode, jars)
+    // Cache key for compilation: hash of driver source + jar paths (sorted for determinism)
+    val compileKey = sha256(driverCode + "\u0000" + jars.map(_.getAbsolutePath).sorted.mkString("\u0000"))
+    val driverJar = cacheFile(compileKey, "-driver.jar", { out =>
+      val driverBytes = compileAgainstJars(driverCode, jars)
+      writeJarFromBytes(driverBytes, out)
+    })
+
     val moduleName = driverObject + "$"
 
-    // Stock: original jars + driver bytes
-    val stockCl = classLoaderFromJarsAndBytes(jars, driverBytes)
+    // Stock: original jars + driver jar
+    val stockCl = classLoaderFromJars(jars ++ Array(driverJar))
     val (sm, sr) = loadDriver(stockCl, moduleName)
 
-    // Goron: deferred until first use
-    def initGoron(): (AnyRef, java.lang.reflect.Method) = {
-      val driverJar = createJarFromBytes(driverBytes)
-      val entryPoints = driverBytes.keys.map(_.replace('.', '/')).toList
-      val optimizedJar = optimizeJars(jars ++ Array(driverJar), entryPoints)
-      val goronCl = classLoaderFromJars(Array(optimizedJar))
-      loadDriver(goronCl, moduleName)
+    // Goron: optimize (or load from cache) eagerly
+    val allInputJars = jars ++ Array(driverJar)
+    val entryPoints = {
+      import java.util.jar.JarFile
+      val jf = new JarFile(driverJar)
+      try {
+        val entries = ListBuffer.empty[String]
+        val en = jf.entries()
+        while (en.hasMoreElements) {
+          val e = en.nextElement()
+          if (e.getName.endsWith(".class"))
+            entries += e.getName.stripSuffix(".class")
+        }
+        entries.toList
+      } finally jf.close()
     }
 
-    new DriverSetup(sm, sr, initGoron)
+    val goronKey = sha256(
+      allInputJars.map(_.getAbsolutePath).sorted.mkString("\u0000") +
+        "\u0000\u0000" + entryPoints.sorted.mkString("\u0000")
+    )
+    val optimizedJar = cacheFile(goronKey, "-goron.jar", { out =>
+      val result = optimizeJars(allInputJars, entryPoints)
+      java.nio.file.Files.move(result.toPath, out.toPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    })
+
+    val goronCl = classLoaderFromJars(Array(optimizedJar))
+    val (gm, gr) = loadDriver(goronCl, moduleName)
+
+    new DriverSetup(sm, sr, gm, gr)
   }
 
   private def loadDriver(cl: ClassLoader, moduleName: String): (AnyRef, java.lang.reflect.Method) = {
