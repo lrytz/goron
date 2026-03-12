@@ -175,10 +175,11 @@ sbt test            # run tests
 
 ## Benchmarks
 
-The `bench/` subproject uses JMH to compare stock Scala 2.13.18 compilation performance against goron-optimized compilation:
+The `bench/` subproject uses JMH to compare stock bytecode against goron-optimized bytecode.
+Each benchmark compiles driver code against the library under test, optimizes with goron, and runs both variants in isolated classloaders.
 
 ```
-sbt "bench/Jmh/run ScalacBench"
+sbt "bench/Jmh/run"                           # run all benchmarks
+sbt "bench/Jmh/run CatsBench"                 # run a specific benchmark
+sbt "bench/Jmh/run ScalacBench -prof stack"   # with JMH profiler
 ```
-
-Two workloads: a small "hello world" file and the `scalap` module (~30 source files).

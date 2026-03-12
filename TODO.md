@@ -84,4 +84,28 @@ Record edges during reachability analysis: which method/class caused each method
 be enqueued, track virtual call resolution chains. Enables debugging why specific classes
 survive DCE.
 
+### Hot scalac benchmark
+
+The current `ScalacBench` is a cold benchmark: each iteration creates a fresh `URLClassLoader`
+and loads `scala.tools.nsc.Main`, so every invocation pays class loading and `Global`
+initialization. The JIT warms up across iterations (same JVM), but the compiler itself starts
+cold each time.
+
+Add a hot benchmark that measures compilation performance after the JVM is warmed up.
+The `Global` does not necessarily need to be reused across iterations — even creating a new
+`Global` each time benefits from JIT optimizations accumulated in prior iterations. The key
+difference from the current cold benchmark is not recreating the classloader each time.
+Check how https://github.com/scala/compiler-benchmark does it.
+
+The existing cold benchmark is still useful for measuring one-shot compilation (e.g., scripting,
+CI), but is less important.
+
+### Deep dive into CollectionPipeline benchmarks
+
+`foldLeft` shows -45% and `mapFilterSum` shows -12%. Investigate what optimizations goron
+actually applies: inspect the inline log, jardiff the stock vs optimized bytecode, and
+understand the resulting code. Is it ideal, or are there further optimization opportunities
+(e.g., eliminating remaining allocations, fusing collection operations, scalar-replacing
+intermediate collections)?
+
 ### Scala 3 support
