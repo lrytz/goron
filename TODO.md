@@ -92,4 +92,10 @@ understand the resulting code. Is it ideal, or are there further optimization op
 (e.g., eliminating remaining allocations, fusing collection operations, scalar-replacing
 intermediate collections)?
 
+### Benchmark Scala 3 compiler (3.8.2)
+
+Add a benchmark that optimizes and runs the Scala 3 compiler. Goron already works on any
+JVM bytecode, so Scala 3 compiled jars can be optimized without Scala 3 support in goron
+itself. This would show whether goron's link-time optimizations benefit Scala 3 code.
+
 ### Scala 3 support
