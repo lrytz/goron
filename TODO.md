@@ -83,3 +83,5 @@ module-aware visibility checks for Java dependencies.
 Record edges during reachability analysis: which method/class caused each method/class to
 be enqueued, track virtual call resolution chains. Enables debugging why specific classes
 survive DCE.
+
+### Scala 3 support
