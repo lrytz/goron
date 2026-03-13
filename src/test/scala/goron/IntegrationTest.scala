@@ -330,6 +330,35 @@ class IntegrationTest extends GoronTesting {
     assertDoesNotInvoke(mainMethod, "f")
   }
 
+  test("issue: Seq.newBuilder.result().map — needs interprocedural type analysis") {
+    // Seq delegates to List, and List.map is final. But the static type of
+    // Seq.newBuilder[Int].result() is Seq (interface), so map can't be resolved.
+    // Requires demand-driven interprocedural type analysis:
+    //   Seq.newBuilder → Delegate.newBuilder → List.newBuilder → new ListBuffer()
+    //   ListBuffer.result() → List
+    //   List.map is final → statically resolved
+    val code =
+      """object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val b = Seq.newBuilder[Int]
+        |    b += 10
+        |    b += 20
+        |    println(b.result().map(_ + 1))
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    assertEquals(runMain(survivors), "List(11, 21)")
+
+    val mainClass = findClass(survivors, "Main$")
+    val mainMethod = getMethod(mainClass, "main")
+    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
+    println(s"=== Seq.newBuilder.result().map invocations: ${invokes.mkString(", ")} ===")
+    // Currently map is called via interface dispatch. After interprocedural type analysis,
+    // it should be inlined since List.map is final.
+    // TODO: assertDoesNotInvoke(mainMethod, "map")
+  }
+
   // --- Collection pipeline tests ---
 
   test("mapFilterSum produces correct result") {
