@@ -353,9 +353,9 @@ class IntegrationTest extends GoronTesting {
     val mainClass = findClass(survivors, "Main$")
     val mainMethod = getMethod(mainClass, "main")
     val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
-    println(s"=== Seq.newBuilder.result().map invocations: ${invokes.mkString(", ")} ===")
     // Currently map is called via interface dispatch. After interprocedural type analysis,
     // it should be inlined since List.map is final.
+    assertInvoke(mainMethod, "scala/collection/IterableOps", "map")
     // TODO: assertDoesNotInvoke(mainMethod, "map")
   }
 
