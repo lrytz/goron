@@ -138,6 +138,9 @@ final class NullnessInterpreter(
     case mi: MethodInsnNode if knownNonNullInvocation(mi) =>
       NotNullValue
 
+    case LambdaMetaFactoryCall(_, _, _, _, _) =>
+      NotNullValue // LambdaMetaFactory always returns a non-null instance
+
     case _ =>
       if (insn.getOpcode == Opcodes.MULTIANEWARRAY) NotNullValue
       else NullnessValue.unknown(insn)

@@ -324,8 +324,9 @@ class IntegrationTest extends GoronTesting {
     val indys = mainMethod.instructions.collect { case i: InvokeDynamic => i.name }
     println(s"=== InvokeDynamic (lambdas): ${indys.mkString(", ")} ===")
 
-    // Current state: map loop is inlined, closure body inlined, but:
-    // - map lambda still allocated (INVOKEDYNAMIC)
+    // Current state: map loop is inlined, closure body inlined, map lambda eliminated.
+    // Remaining issues:
+    // - filter lambda still allocated (interface dispatch blocks filter inlining)
     // - filter/sum not inlined (interface dispatch)
     // - intermediate collections and boxing remain
     // See individual tests below for each issue.
@@ -333,12 +334,14 @@ class IntegrationTest extends GoronTesting {
 
   // --- Collection pipeline optimization issues (individual) ---
 
-  test("issue: map closure allocated but unused after inlining") {
-    // When map's internal loop is inlined, the closure body (_ * 2) is inlined
-    // at the call site, but the closure object is still allocated via INVOKEDYNAMIC.
-    // The closure optimizer rewrites closure.apply() → direct body call, but relies
-    // on CopyProp.eliminatePushPop to remove the now-unused allocation. This doesn't
-    // happen because the closure reference is stored in a local (not immediately POPped).
+  test("map closure eliminated after inlining") {
+    // After the closure optimizer rewrites closure.apply() → direct body call, the
+    // closure object becomes unused. The chain of local optimizations eliminates it:
+    // 1. Nullness analysis proves the LambdaMetaFactory result is non-null
+    // 2. The null-check on the closure (IFNONNULL) is replaced by POP + GOTO
+    // 3. eliminatePushPop removes the ALOAD + POP pair
+    // 4. eliminateStaleStores replaces the now-consumerless ASTORE with POP
+    // 5. eliminatePushPop removes the INVOKEDYNAMIC via handleClosureInst
     val code =
       """object Main {
         |  def main(args: Array[String]): Unit = {
@@ -352,11 +355,12 @@ class IntegrationTest extends GoronTesting {
 
     val mainClass = findClass(survivors, "Main$")
     val mainMethod = getMethod(mainClass, "main")
-    println(decompileClass(survivors, mainClass))
 
-    val indys = mainMethod.instructions.collect { case i: InvokeDynamic => i.name }
-    println(s"=== InvokeDynamic (lambdas): ${indys.mkString(", ")} ===")
-    // TODO: after fixing, assert: assertNoIndy(mainMethod)
+    // The map closure should be completely eliminated — no INVOKEDYNAMIC remains
+    assertNoIndy(mainMethod)
+    // The closure body (* 2) should be inlined directly in the loop
+    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
+    assert(!invokes.exists(_.contains("anonfun")), s"Closure body method should be inlined, got: $invokes")
   }
 
   test("issue: filter not inlined — interface dispatch blocks devirtualization") {

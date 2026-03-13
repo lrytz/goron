@@ -107,13 +107,13 @@ survive DCE.
 
 Three independent improvement opportunities, each with a test case in `IntegrationTest.scala`:
 
-**1. Map closure allocated but unused after inlining** (`issue: map closure allocated...`)
-The closure optimizer rewrites `closure.apply()` → direct body call, but the closure object
-is still allocated via `INVOKEDYNAMIC`. `CopyProp.eliminatePushPop` only removes allocations
-followed by `POP`; here the reference is stored in a local variable, so it persists even
-though it's no longer used. Fix: extend dead-store analysis to detect that the local is
-written but never read after closure rewriting, then eliminate both the allocation and the
-store.
+**1. Map closure allocated but unused after inlining** — FIXED.
+The root cause was that `NullnessInterpreter` did not recognize `LambdaMetaFactory`
+INVOKEDYNAMIC results as non-null. After the closure optimizer rewrites `closure.apply()` →
+direct body call and inserts a null check on the closure reference, nullness analysis couldn't
+prove it non-null, so the null check remained, keeping the closure alive. Fix: return
+`NotNullValue` for `LambdaMetaFactoryCall` in `NullnessInterpreter.naryOperation`. This
+enables the chain: null-check elimination → push-pop → stale store → closure removal.
 
 **2. filter/sum not inlined — interface dispatch blocks devirtualization**
 (`issue: filter not inlined...`)
