@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
   * and reused across iterations. Each iteration invokes dotty.tools.dotc.Main.process
   * to compile source files.
   *
-  * Run with: sbt "bench/Jmh/run Scala3CompilerBench"
+  * Run with: sbt "bench/Jmh/run Scala3CompilerHotBench"
   */
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 @Warmup(iterations = 10, time = 10)
 @Measurement(iterations = 10, time = 10)
 @Fork(value = 3, jvmArgs = Array("-Xmx4g", "-Xms4g"))
-class Scala3CompilerBench {
+class Scala3CompilerHotBench {
 
   @Param(Array("hello"))
   var sourceType: String = _

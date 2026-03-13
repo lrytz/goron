@@ -15,7 +15,7 @@ import scala.jdk.CollectionConverters._
   * from JIT optimizations accumulated in prior iterations — matching how a long-running
   * build server would behave.
   *
-  * Run with: sbt "bench/Jmh/run ScalacBench"
+  * Run with: sbt "bench/Jmh/run ScalacHotBench"
   */
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -23,7 +23,7 @@ import scala.jdk.CollectionConverters._
 @Warmup(iterations = 10, time = 10)
 @Measurement(iterations = 10, time = 10)
 @Fork(value = 3, jvmArgs = Array("-Xmx4g", "-Xms4g"))
-class ScalacBench {
+class ScalacHotBench {
 
   @Param(Array("hello", "scalap"))
   var sourceType: String = _
