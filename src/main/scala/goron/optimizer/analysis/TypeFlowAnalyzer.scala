@@ -14,7 +14,7 @@ import goron.optimizer.opt.BytecodeUtils._
 
 import scala.annotation.tailrec
 import scala.tools.asm.tree.analysis.{Analyzer, BasicInterpreter, BasicValue}
-import scala.tools.asm.tree.{AbstractInsnNode, InsnNode, MethodNode}
+import scala.tools.asm.tree.{AbstractInsnNode, InsnNode, MethodInsnNode, MethodNode, TypeInsnNode}
 import scala.tools.asm.{Opcodes, Type}
 
 abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opcodes.ASM7) {
@@ -31,6 +31,22 @@ abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opco
     case Type.OBJECT | Type.ARRAY => true
     case _                        => false
   })
+
+  override def newOperation(insn: AbstractInsnNode): BasicValue = insn.getOpcode match {
+    case Opcodes.NEW => new ExactTypeValue(Type.getObjectType(insn.asInstanceOf[TypeInsnNode].desc))
+    case _           => super.newOperation(insn)
+  }
+
+  override def unaryOperation(insn: AbstractInsnNode, value: BasicValue): BasicValue = insn.getOpcode match {
+    case Opcodes.CHECKCAST =>
+      // Preserve exact type through casts: if we know the value is exactly A and A conforms to
+      // the cast target B, the value is still exactly A after the cast.
+      value match {
+        case ev: ExactTypeValue => ev
+        case _                  => super.unaryOperation(insn, value)
+      }
+    case _ => super.unaryOperation(insn, value)
+  }
 
   override def binaryOperation(insn: AbstractInsnNode, value1: BasicValue, value2: BasicValue): BasicValue =
     insn.getOpcode match {
@@ -77,8 +93,9 @@ object TypeFlowInterpreter {
             case oav: AaloadValue => tav.aaload == oav.aaload
             case _                => false
           }
-        case _: LMFValue    => other.isInstanceOf[LMFValue] && super.equals(other)
-        case pv: ParamValue =>
+        case _: LMFValue      => other.isInstanceOf[LMFValue] && super.equals(other)
+        case _: ExactTypeValue => other.isInstanceOf[ExactTypeValue] && super.equals(other)
+        case pv: ParamValue   =>
           other.isInstanceOf[ParamValue] && pv.local == other.asInstanceOf[ParamValue].local && super.equals(other)
         case _ =>
           !other.isInstanceOf[SpecialValue] && super.equals(other) // A non-special value cannot equal a special value
@@ -111,6 +128,12 @@ object TypeFlowInterpreter {
   // Note: merging two ParamValue with the same underlying type gives a ParamValue, but if the
   // underlying types differ, the merge is just a BasicValue
   class ParamValue(val local: Int, tpe: Type) extends SpecialAwareBasicValue(tpe) with SpecialValue
+
+  // A value whose exact runtime type is known (from a NEW instruction). This enables
+  // devirtualization: calls on an ExactTypeValue can be statically resolved even if
+  // the class is not final, because we know the precise runtime type.
+  // Note: merging two ExactTypeValue with different types strips the exact flag.
+  class ExactTypeValue(tpe: Type) extends SpecialAwareBasicValue(tpe) with SpecialValue
 }
 
 /** A [[TypeFlowInterpreter]] which collapses LUBs of non-equal reference types to Object. This could be made more
@@ -131,5 +154,11 @@ class NonLubbingTypeFlowAnalyzer(methodNode: MethodNode, classInternalName: Inte
       arrDesc.substring(1) // drop `[`
 
     case _ => value.getType.getDescriptor
+  }
+
+  /** True if the receiver at the given call instruction has a known exact type (from a NEW instruction). */
+  def receiverHasExactType(call: MethodInsnNode, numParams: Int): Boolean = {
+    val f = frameAt(call)
+    f != null && f.peekStack(numParams).isInstanceOf[ExactTypeValue]
   }
 }

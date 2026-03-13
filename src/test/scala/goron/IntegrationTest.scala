@@ -227,7 +227,7 @@ class IntegrationTest extends GoronTesting {
     val survivors = compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = false))
     val helper = findClass(survivors, "Helper")
     val methodNames = helper.methods.asScala.map(_.name).toSet
-    assert(methodNames.contains("used"), s"used should survive: $methodNames")
+    // `used` may or may not survive: exact-type devirtualization can inline it
     assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
     assert(methodNames.contains("<init>"), s"<init> should survive: $methodNames")
     assertEquals(runMain(survivors), "42")
@@ -251,7 +251,7 @@ class IntegrationTest extends GoronTesting {
     val survivors = compileAndRunFullPipeline(code, Set("Main"), goronConfig.copy(closedWorld = false))
     val hello = findClass(survivors, "Hello")
     val methodNames = hello.methods.asScala.map(_.name).toSet
-    assert(methodNames.contains("greet"), s"greet should survive: $methodNames")
+    // `greet` may or may not survive: exact-type devirtualization can inline it
     assert(!methodNames.contains("unused"), s"unused should be stripped: $methodNames")
     assertEquals(runMain(survivors), "hello")
   }
@@ -300,6 +300,34 @@ class IntegrationTest extends GoronTesting {
       hasCause(e, classOf[ClassNotFoundException]),
       s"Expected ClassNotFoundException in cause chain, got: ${e.getCause}"
     )
+  }
+
+  // --- Exact type devirtualization ---
+
+  test("exact type from NEW enables devirtualization") {
+    // When the receiver type is known exactly (from a NEW instruction), virtual calls
+    // can be inlined even if the class is not final and the method is not final.
+    val code =
+      """class A {
+        |  def f: Int = 42
+        |}
+        |class B extends A {
+        |  override def f: Int = 99
+        |}
+        |object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val a = new A()
+        |    println(a.f)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    assertEquals(runMain(survivors), "42")
+
+    val mainClass = findClass(survivors, "Main$")
+    val mainMethod = getMethod(mainClass, "main")
+    // A.f should be inlined (the receiver is exactly A from NEW)
+    assertDoesNotInvoke(mainMethod, "f")
   }
 
   // --- Collection pipeline tests ---

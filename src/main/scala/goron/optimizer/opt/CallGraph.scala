@@ -148,16 +148,16 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
               }
           val paramTps = FLazy(Type.getArgumentTypes(call.desc))
           // This is the type where method lookup starts (implemented in byteCodeRepository.methodNode)
-          val preciseOwner =
-            if (isStaticCallsite(call)) call.owner
-            else if (isSuperCall) definingClass.info.get.superClass.get.internalName
-            else if (call.getOpcode == Opcodes.INVOKESPECIAL) call.owner
+          val (preciseOwner, receiverIsExactType) =
+            if (isStaticCallsite(call)) (call.owner, false)
+            else if (isSuperCall) (definingClass.info.get.superClass.get.internalName, false)
+            else if (call.getOpcode == Opcodes.INVOKESPECIAL) (call.owner, false)
             else {
               // invokevirtual, invokeinterface: start search at the type of the receiver
-              val f = typeAnalyzer.frameAt(call)
-              // Not Type.getArgumentsAndReturnSizes: in asm.Frame, size-2 values use a single stack slot
               val numParams = paramTps.get.length
-              f.peekStack(numParams).getType.getInternalName
+              val isExact = typeAnalyzer.receiverHasExactType(call, numParams)
+              val f = typeAnalyzer.frameAt(call)
+              (f.peekStack(numParams).getType.getInternalName, isExact)
             }
 
           val callee: Either[OptimizerWarning, Callee] = {
@@ -184,7 +184,7 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
             } yield {
               val declarationClassBType = classBTypeFromClassNode(declarationClassNode)
               val info =
-                analyzeCallsite(method, declarationClassBType, call, paramTps, calleeSourceFilePath, definingClass)
+                analyzeCallsite(method, declarationClassBType, call, paramTps, calleeSourceFilePath, definingClass, receiverIsExactType)
               import info._
               Callee(
                 callee = method,
@@ -340,7 +340,8 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
       call: MethodInsnNode,
       paramTps: FLazy[Array[Type]],
       calleeSourceFilePath: Option[String],
-      callsiteClass: ClassBType
+      callsiteClass: ClassBType,
+      receiverIsExactType: Boolean = false
   ): CallsiteInfo = {
     val methodSignature = (calleeMethodNode.name, calleeMethodNode.desc)
 
@@ -370,13 +371,14 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
           //   - all children are final
           //   - none of the children overrides map
           //
-          // TODO: type analysis can render more calls statically resolved. Example:
-          //   new A.f  // can be inlined, the receiver type is known to be exactly A.
+          // (3) If the receiver's exact runtime type is known (e.g. from a NEW instruction),
+          // the call can be statically resolved regardless of whether the class or method is final.
           val isStaticallyResolved: Boolean = {
             isStaticCallsite(call) ||
             (call.getOpcode == Opcodes.INVOKESPECIAL && receiverType == callsiteClass) || // (1)
             methodInlineInfo.effectivelyFinal ||
-            receiverType.info.orThrow.inlineInfo.isEffectivelyFinal // (2)
+            receiverType.info.orThrow.inlineInfo.isEffectivelyFinal || // (2)
+            receiverIsExactType // (3)
           }
 
           val warning = calleeDeclarationClassBType.info.orThrow.inlineInfo.warning.map(

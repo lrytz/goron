@@ -1,18 +1,20 @@
 # TODO
 
-### Inline virtual calls with known exact type
+### Inline virtual calls with known exact type — partially done
 
 When the receiver type is known precisely, virtual calls can be inlined even if
 the method is overridden in subclasses. For example, in `new Foo().bar()` the
 receiver is exactly `Foo`, so `bar` can be resolved and inlined without requiring
-it to be effectively final. This applies after constructor calls, after
-`checkcast`, and potentially after type flow analysis determines a local always
-holds a specific type.
+it to be effectively final.
 
-The compiler's `CallGraph` already has a TODO for this (`"type analysis can
-render more calls statically resolved"`). Currently `isStaticallyResolved` only
-checks if the method or the receiver's declared class is effectively final, not
-the actual type at the callsite.
+**Done:** `ExactTypeValue` in `TypeFlowAnalyzer` tracks values from `NEW` instructions
+through stores, loads, and casts. `CallGraph.isStaticallyResolved` uses this to
+devirtualize calls when the exact type is known.
+
+**Remaining:** Type flow analysis to determine exact types from method return values
+(e.g., knowing that `IndexedSeq.newBuilder().result()` returns `Vector`). This would
+enable devirtualizing calls like `(1 to 10).map(...).filter(...)` where `map` returns
+an `IndexedSeq` interface type but the runtime type is always `Vector`.
 
 ### Generalized stack allocation / scalar replacement
 
