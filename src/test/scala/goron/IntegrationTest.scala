@@ -8,10 +8,12 @@
 package goron
 
 import goron.optimizer.opt.InlineInfoAttribute
+import goron.testkit.ASMConverters._
 import goron.testkit.GoronTesting
 
 import scala.jdk.CollectionConverters._
 import scala.tools.asm.Opcodes
+import scala.tools.asm.tree.ClassNode
 
 /** Integration tests that run the full goron pipeline over user classes + scala-library. These test whole-program
   * properties: DCE, inlining with real library classes, and closed-world optimizations.
@@ -298,6 +300,164 @@ class IntegrationTest extends GoronTesting {
       hasCause(e, classOf[ClassNotFoundException]),
       s"Expected ClassNotFoundException in cause chain, got: ${e.getCause}"
     )
+  }
+
+  // --- Collection pipeline tests ---
+
+  test("mapFilterSum produces correct result") {
+    val code =
+      """object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    println((1 to 1000).map(_ * 2).filter(_ > 50).sum)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    assertEquals(runMain(survivors), "1000350")
+
+    val mainClass = findClass(survivors, "Main$")
+    val mainMethod = getMethod(mainClass, "main")
+    println(decompileClass(survivors, mainClass))
+
+    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
+    println(s"=== Remaining invocations: ${invokes.mkString(", ")} ===")
+    val indys = mainMethod.instructions.collect { case i: InvokeDynamic => i.name }
+    println(s"=== InvokeDynamic (lambdas): ${indys.mkString(", ")} ===")
+
+    // Current state: map loop is inlined, closure body inlined, but:
+    // - map lambda still allocated (INVOKEDYNAMIC)
+    // - filter/sum not inlined (interface dispatch)
+    // - intermediate collections and boxing remain
+    // See individual tests below for each issue.
+  }
+
+  // --- Collection pipeline optimization issues (individual) ---
+
+  test("issue: map closure allocated but unused after inlining") {
+    // When map's internal loop is inlined, the closure body (_ * 2) is inlined
+    // at the call site, but the closure object is still allocated via INVOKEDYNAMIC.
+    // The closure optimizer rewrites closure.apply() → direct body call, but relies
+    // on CopyProp.eliminatePushPop to remove the now-unused allocation. This doesn't
+    // happen because the closure reference is stored in a local (not immediately POPped).
+    val code =
+      """object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val xs = (1 to 10).map(_ * 2)
+        |    println(xs.size)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    assertEquals(runMain(survivors), "10")
+
+    val mainClass = findClass(survivors, "Main$")
+    val mainMethod = getMethod(mainClass, "main")
+    println(decompileClass(survivors, mainClass))
+
+    val indys = mainMethod.instructions.collect { case i: InvokeDynamic => i.name }
+    println(s"=== InvokeDynamic (lambdas): ${indys.mkString(", ")} ===")
+    // TODO: after fixing, assert: assertNoIndy(mainMethod)
+  }
+
+  test("issue: filter not inlined — interface dispatch blocks devirtualization") {
+    // filter is called on the result of map, which has static type IndexedSeq (interface).
+    // The inliner requires isStaticallyResolved for safeToInline, which fails for
+    // interface calls. Even closed-world analysis can't help because IndexedSeq has
+    // multiple implementations. Would need type flow analysis to know that
+    // IndexedSeq$.newBuilder().result() returns a specific concrete type (Vector).
+    val code =
+      """object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val xs = (1 to 10).map(_ * 2).filter(_ > 5)
+        |    println(xs.size)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    assertEquals(runMain(survivors), "8")
+
+    val mainClass = findClass(survivors, "Main$")
+    val mainMethod = getMethod(mainClass, "main")
+    println(decompileClass(survivors, mainClass))
+
+    // filter is still called via interface dispatch
+    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
+    println(s"=== Remaining invocations: ${invokes.mkString(", ")} ===")
+    assertInvoke(mainMethod, "scala/collection/immutable/IndexedSeq", "filter")
+    // TODO: after fixing, filter's loop should be inlined and assertDoesNotInvoke(mainMethod, "filter")
+  }
+
+  test("issue: boxing in map loop — unboxToInt/Integer.valueOf") {
+    // The inlined map loop iterates with Iterator[Object], unboxes to int, applies
+    // the function, then re-boxes with Integer.valueOf before addOne. The specialized
+    // JFunction1$mcII$sp avoids boxing for the closure call itself, but the
+    // iterator/builder pipeline still boxes because it uses generic Object types.
+    val code =
+      """object Main {
+        |  def main(args: Array[String]): Unit = {
+        |    val xs = (1 to 10).map(_ + 1)
+        |    println(xs.sum)
+        |  }
+        |}
+      """.stripMargin
+    val survivors = compileAndRunFullPipeline(code, Set("Main"))
+    assertEquals(runMain(survivors), "65")
+
+    val mainClass = findClass(survivors, "Main$")
+    val mainMethod = getMethod(mainClass, "main")
+
+    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
+    val hasBoxing = invokes.exists(_.contains("BoxesRunTime")) || invokes.exists(_.contains("Integer.valueOf"))
+    println(s"=== Boxing calls: ${invokes.filter(i => i.contains("Box") || i.contains("valueOf")).mkString(", ")} ===")
+    // TODO: after fixing, assert: assert(!hasBoxing)
+  }
+
+  private def textifyMethod(classNode: ClassNode, methodName: String): String = {
+    val m = getAsmMethod(classNode, methodName)
+    val textifier = new scala.tools.asm.util.Textifier()
+    m.accept(new scala.tools.asm.util.TraceMethodVisitor(textifier))
+    val sw = new java.io.StringWriter()
+    textifier.print(new java.io.PrintWriter(sw))
+    s"=== Bytecode: ${classNode.name}.$methodName ===\n${sw.toString}"
+  }
+
+  private def decompileClass(survivors: List[ClassNode], classNode: ClassNode): String = {
+    import org.benf.cfr.reader.api.{CfrDriver, ClassFileSource, OutputSinkFactory}
+    import java.util
+
+    val pp = GoronTesting.createPostProcessor(goronConfig)
+    for (cn <- survivors) pp.byteCodeRepository.add(cn, Some("goron-test"))
+    pp.setInnerClasses(classNode)
+    val classBytes = pp.serializeClass(classNode)
+    val className = classNode.name.replace('/', '.')
+    val classFile = classNode.name + ".class"
+
+    val result = new StringBuilder
+    val sink = new OutputSinkFactory {
+      override def getSupportedSinks(sinkType: OutputSinkFactory.SinkType, collection: util.Collection[OutputSinkFactory.SinkClass]) =
+        util.Arrays.asList(OutputSinkFactory.SinkClass.STRING)
+      override def getSink[T](sinkType: OutputSinkFactory.SinkType, sinkClass: OutputSinkFactory.SinkClass) =
+        new OutputSinkFactory.Sink[T] {
+          override def write(s: T): Unit =
+            if (sinkType == OutputSinkFactory.SinkType.JAVA) result.append(s.toString)
+        }
+    }
+
+    val source = new ClassFileSource {
+      override def getPossiblyRenamedPath(path: String) = path
+      override def addJar(jarPath: String): util.Collection[String] = util.Collections.emptyList()
+      override def informAnalysisRelativePathDetail(usePath: String, classFilePath: String): Unit = ()
+      override def getClassFileContent(path: String) =
+        if (path == classFile) new org.benf.cfr.reader.bytecode.analysis.parse.utils.Pair(classBytes, className)
+        else null
+    }
+
+    val options = new util.HashMap[String, String]()
+    options.put("showversion", "false")
+    options.put("hideutf", "false")
+    val driver = new CfrDriver.Builder().withClassFileSource(source).withOutputSink(sink).withOptions(options).build()
+    driver.analyse(util.Arrays.asList(classFile))
+    s"=== CFR decompilation: ${classNode.name} ===\n${result.toString}"
   }
 
   test("for-comprehension over Range prints correctly") {

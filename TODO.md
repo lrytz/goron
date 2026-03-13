@@ -96,11 +96,43 @@ survive DCE.
 
 ### Deep dive into CollectionPipeline benchmarks
 
-`foldLeft` shows -45% and `mapFilterSum` shows -12%. Investigate what optimizations goron
-actually applies: inspect the inline log, jardiff the stock vs optimized bytecode, and
-understand the resulting code. Is it ideal, or are there further optimization opportunities
-(e.g., eliminating remaining allocations, fusing collection operations, scalar-replacing
-intermediate collections)?
+`foldLeft` shows -45% and `mapFilterSum` shows -12%. The `mapFilterSum` pipeline
+`(1 to 1000).map(_ * 2).filter(_ > 50).sum` was investigated in detail (see test cases in
+`IntegrationTest.scala`). Current state after goron optimization:
+
+- **map's internal loop is inlined**: the `Range.foreach` + `Builder.addOne` loop is inlined
+  into the caller, and the map closure body (`_ * 2`) is inlined at the call site.
+- **filter and sum are NOT inlined**: they remain as `INVOKEINTERFACE` calls on `IndexedSeq`.
+- **Intermediate collections and boxing remain**.
+
+Three independent improvement opportunities, each with a test case in `IntegrationTest.scala`:
+
+**1. Map closure allocated but unused after inlining** (`issue: map closure allocated...`)
+The closure optimizer rewrites `closure.apply()` → direct body call, but the closure object
+is still allocated via `INVOKEDYNAMIC`. `CopyProp.eliminatePushPop` only removes allocations
+followed by `POP`; here the reference is stored in a local variable, so it persists even
+though it's no longer used. Fix: extend dead-store analysis to detect that the local is
+written but never read after closure rewriting, then eliminate both the allocation and the
+store.
+
+**2. filter/sum not inlined — interface dispatch blocks devirtualization**
+(`issue: filter not inlined...`)
+`map` returns static type `IndexedSeq` (an interface). Calls to `filter` and `sum` on this
+result are `INVOKEINTERFACE`, which fails `isStaticallyResolved` in the call graph. Even
+closed-world analysis can't help because `IndexedSeq` has multiple implementations. Fix:
+type flow analysis to track that `IndexedSeq$.newBuilder().result()` always returns `Vector`,
+narrowing the receiver type so `filter`/`sum` become statically resolved and inlinable. This
+is the same issue as "Inline virtual calls with known exact type" above. Note: `sum` faces
+the exact same interface dispatch barrier as `filter` — inlining sum alone would not help
+because the call site is `INVOKEINTERFACE` on an unresolved receiver type.
+
+**3. Boxing in map loop** (`issue: boxing in map loop...`)
+The inlined map loop iterates via `Iterator[Object]`, unboxes to `int` with
+`BoxesRunTime.unboxToInt`, applies the function, then re-boxes with `Integer.valueOf` before
+`Builder.addOne(Object)`. The specialized `JFunction1$mcII$sp` avoids boxing for the closure
+call itself, but the generic iterator/builder pipeline still boxes. Fix: after enough inlining
+exposes the builder internals, generalized scalar replacement (see above) could eliminate the
+boxing, or a specialized rewrite for known collection types could bypass the generic pipeline.
 
 ### Scala 3 support
 
