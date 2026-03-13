@@ -38,16 +38,16 @@ Parsing class files...
 Reachability analysis...
   5460 of 8431 classes reachable (0.9s)
 Closed-world analysis...
-  6361 final classes, 123866 final methods (0.3s)
+  6361 final classes, 123866 final methods, 3493 single-impl abstract methods (0.4s)
 Inlining and closure optimization...
   Done (13.1s)
 Local optimizations...
-  5483 classes optimized (37.8s)
+  5483 classes optimized (37.9s)
 Dead code elimination...
-  4641 classes retained, 842 removed, 28410 methods stripped (0.5s)
+  4641 classes retained, 842 removed, 28384 methods stripped (0.6s)
 Serializing and writing output...
-  scalac-optimized.jar (1.5s)
-goron: 8431 → 4641 classes, 28410 methods stripped, 22.5M → 13.8M (55.1s)
+  scalac-optimized.jar (1.6s)
+goron: 8431 → 4641 classes, 28384 methods stripped, 22.5M → 13.8M (55.6s)
 
 # compile using the optimized compiler
 $ java -cp scalac-optimized.jar scala.tools.nsc.Main \
@@ -183,3 +183,95 @@ sbt "bench/Jmh/run"                           # run all benchmarks
 sbt "bench/Jmh/run CatsBench"                 # run a specific benchmark
 sbt "bench/Jmh/run ScalacBench -prof stack"   # with JMH profiler
 ```
+
+### Results summary
+
+State as of March 13, 2026.
+The summary is AI-generated, some explanations are probably confident hallucinations.
+
+Goron's wins come from cross-library inlining and closure elimination that the JIT cannot do on its own:
+
+- **CatsBench -15%**: typeclass forwarders and closures inlined across library boundaries
+- **CollectionPipeline.foldLeft -45%**: cross-library inlining turns `foldLeft` with a closure into a tight loop
+- **CollectionPipeline.mapFilterSum -12%**: similar pipeline optimization across `map`/`filter`/`sum`
+- **ScalacColdBench -8%**: cold compiler startup benefits from DCE (8431 → 4641 classes, jar 22.5M → 13.8M)
+- **ParserCombinatorsBench -3%**: modest win from inlining combinator internals
+
+Further notes:
+- Neutral results on Circe, Fastparse, Spire, and the micro benchmarks (box/unbox, closure, devirtualization, inlining).
+- Hot scalac and the Scala 3 compiler also show no improvement.
+- For hot scalac, the compiler and scala-library are already built with the Scala 2 backend optimizer, so goron has fewer cross-library inlining opportunities left.
+- For Scala 3, this is likely because its classfiles lack the `ScalaInlineInfo` attribute that goron uses for inline heuristics.
+- The micro benchmarks confirm that the JIT already handles small self-contained code well — goron's value is in cross-library optimizations the JIT cannot perform.
+
+<details>
+<summary>Full JMH results</summary>
+
+```
+Benchmark                                             (sourceType)  Mode  Cnt      Score       Error  Units
+
+g.b.apps.CatsBench.goron                                       N/A  avgt   10   1999.760 ±    14.014  us/op
+g.b.apps.CatsBench.stock                                       N/A  avgt   10   2357.217 ±    15.294  us/op
+
+g.b.apps.CirceBench.goron                                      N/A  avgt   10   4347.256 ±    61.722  us/op
+g.b.apps.CirceBench.stock                                      N/A  avgt   10   4371.930 ±    37.412  us/op
+
+g.b.apps.FastparseBench.goron                                  N/A  avgt   10  11321.770 ±   223.539  us/op
+g.b.apps.FastparseBench.stock                                  N/A  avgt   10  11532.096 ±   259.055  us/op
+
+g.b.apps.ParserCombinatorsBench.goron                          N/A  avgt   10  23779.758 ±   150.074  us/op
+g.b.apps.ParserCombinatorsBench.stock                          N/A  avgt   10  24605.904 ±   109.798  us/op
+
+g.b.apps.Scala3CompilerHotBench.goron                        hello  avgt   30     57.986 ±     1.130  ms/op
+g.b.apps.Scala3CompilerHotBench.stock                        hello  avgt   30     58.433 ±     0.699  ms/op
+
+g.b.apps.ScalacHotBench.goron                                hello  avgt   30     20.848 ±     0.416  ms/op
+g.b.apps.ScalacHotBench.stock                                hello  avgt   30     21.458 ±     0.725  ms/op
+
+g.b.apps.ScalacHotBench.goron                               scalap  avgt   30    365.923 ±    11.597  ms/op
+g.b.apps.ScalacHotBench.stock                               scalap  avgt   30    370.142 ±    12.427  ms/op
+
+g.b.apps.ScalacColdBench.goron                               hello  avgt   10    852.733 ±    64.738  ms/op
+g.b.apps.ScalacColdBench.stock                               hello  avgt   10    929.359 ±    11.039  ms/op
+
+g.b.apps.ScalacColdBench.goron                              scalap  avgt   10   3811.872 ±    94.214  ms/op
+g.b.apps.ScalacColdBench.stock                              scalap  avgt   10   4137.367 ±   239.344  ms/op
+
+g.b.apps.SpireBench.goron                                      N/A  avgt   10    425.977 ±     7.288  ms/op
+g.b.apps.SpireBench.stock                                      N/A  avgt   10    428.629 ±     2.505  ms/op
+
+g.b.micro.BoxUnboxBench.boxUnboxGoron                          N/A  avgt   20   3329.269 ±     4.265  ns/op
+g.b.micro.BoxUnboxBench.boxUnboxStock                          N/A  avgt   20   3336.686 ±    12.696  ns/op
+
+g.b.micro.BoxUnboxBench.refEliminationGoron                    N/A  avgt   20   3328.206 ±     6.884  ns/op
+g.b.micro.BoxUnboxBench.refEliminationStock                    N/A  avgt   20   3333.492 ±     6.645  ns/op
+
+g.b.micro.BoxUnboxBench.tupleUnboxGoron                        N/A  avgt   20   3330.008 ±     9.582  ns/op
+g.b.micro.BoxUnboxBench.tupleUnboxStock                        N/A  avgt   20   3344.252 ±    22.506  ns/op
+
+g.b.micro.ClosureBench.closureEliminationGoron                 N/A  avgt   20  18649.583 ±    61.124  ns/op
+g.b.micro.ClosureBench.closureEliminationStock                 N/A  avgt   20  18603.472 ±    26.472  ns/op
+
+g.b.micro.ClosureBench.closureSpecializationGoron              N/A  avgt   20   3331.747 ±     7.931  ns/op
+g.b.micro.ClosureBench.closureSpecializationStock              N/A  avgt   20   3334.451 ±     9.701  ns/op
+
+g.b.micro.CollectionPipelineBench.foldLeftGoron                N/A  avgt   20    324.512 ±     1.149  ns/op
+g.b.micro.CollectionPipelineBench.foldLeftStock                N/A  avgt   20    595.449 ±     4.649  ns/op
+
+g.b.micro.CollectionPipelineBench.mapFilterSumGoron            N/A  avgt   20   7437.561 ±    54.576  ns/op
+g.b.micro.CollectionPipelineBench.mapFilterSumStock            N/A  avgt   20   8489.443 ±    67.096  ns/op
+
+g.b.micro.DevirtualizationBench.sealedHierarchyGoron           N/A  avgt   20  54725.545 ±   118.845  ns/op
+g.b.micro.DevirtualizationBench.sealedHierarchyStock           N/A  avgt   20  54811.574 ±   230.369  ns/op
+
+g.b.micro.DevirtualizationBench.singleImplGoron                N/A  avgt   20   6305.992 ±    17.645  ns/op
+g.b.micro.DevirtualizationBench.singleImplStock                N/A  avgt   20   6319.511 ±    37.553  ns/op
+
+g.b.micro.InliningBench.inlineChainGoron                       N/A  avgt   20   3340.623 ±    11.184  ns/op
+g.b.micro.InliningBench.inlineChainStock                       N/A  avgt   20   3363.621 ±    33.764  ns/op
+
+g.b.micro.InliningBench.inlineFinalGoron                       N/A  avgt   20   8773.232 ±    48.942  ns/op
+g.b.micro.InliningBench.inlineFinalStock                       N/A  avgt   20   8756.639 ±    48.629  ns/op
+```
+
+</details>
