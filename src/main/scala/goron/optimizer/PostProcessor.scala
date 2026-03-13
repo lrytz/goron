@@ -24,7 +24,9 @@ final class PostProcessor(
       * (abstractOwner, name, desc) → concreteImplClass.
       * Populated by closed-world analysis; enables devirtualization in the call graph.
       */
-    val singleImplAbstractMethods: Map[(String, String, String), String] = Map.empty
+    val singleImplAbstractMethods: Map[(String, String, String), String] = Map.empty,
+    /** Class hierarchy for narrowed-type devirtualization queries. */
+    val classHierarchy: Option[goron.ClassHierarchy] = None
 ) {
 
   val bTypes: BTypes = new BTypes(settings, classpath, reporter)

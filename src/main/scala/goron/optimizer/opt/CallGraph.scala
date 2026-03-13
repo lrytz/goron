@@ -11,8 +11,8 @@ import goron.optimizer.BTypes.InternalName
 import goron.optimizer.BackendReporting._
 import goron.optimizer.Position.NoPosition
 import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
-import goron.optimizer.analysis.TypeFlowInterpreter.{LMFValue, ParamValue}
-import goron.optimizer.analysis._
+import goron.optimizer.analysis.TypeFlowInterpreter.{ExactTypeValue, LMFValue, NarrowedTypeValue, ParamValue}
+import goron.optimizer.analysis.{InterproceduralExactTypeValue, _}
 import goron.optimizer.opt.BytecodeUtils._
 import goron.optimizer.{Position, PostProcessor}
 
@@ -77,9 +77,20 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
   // statically by the call graph. See Inliner.maybeInlinedLater.
   val staticallyResolvedInvokespecial: mutable.Set[MethodInsnNode] = (mutable.Set.empty)
 
+  lazy val interproceduralAnalyzer: InterproceduralTypeAnalyzer =
+    new InterproceduralTypeAnalyzer(postProcessor.byteCodeRepository)
+
   def isStaticCallsite(call: MethodInsnNode): Boolean = {
     val opc = call.getOpcode
     opc == Opcodes.INVOKESTATIC || opc == Opcodes.INVOKESPECIAL && staticallyResolvedInvokespecial(call)
+  }
+
+  /** Check if a method is effectively final when the receiver is known to be at most `receiverType`. */
+  private def isMethodFinalForNarrowedType(receiverType: String, methodName: String, methodDesc: String): Boolean = {
+    postProcessor.classHierarchy match {
+      case Some(hierarchy) => !hierarchy.hasOverrideInSubclasses(receiverType, methodName, methodDesc)
+      case None            => false
+    }
   }
 
   def removeCallsite(invocation: MethodInsnNode, methodNode: MethodNode): Option[Callsite] = {
@@ -125,7 +136,10 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
       !BytecodeUtils.isAbstractMethod(methodNode) && !BytecodeUtils.isNativeMethod(methodNode) && AsmAnalyzer
         .sizeOKForBasicValue(methodNode)
     ) {
-      lazy val typeAnalyzer = new NonLubbingTypeFlowAnalyzer(methodNode, definingClass.internalName)
+      lazy val typeAnalyzer = new NonLubbingTypeFlowAnalyzer(
+        methodNode, definingClass.internalName,
+        new InterproceduralTypeFlowInterpreter(interproceduralAnalyzer, null, depth = 5)
+      )
 
       var methodCallsites = Map.empty[MethodInsnNode, Callsite]
       var methodClosureInstantiations = Map.empty[InvokeDynamicInsnNode, ClosureInstantiation]
@@ -148,16 +162,29 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
               }
           val paramTps = FLazy(Type.getArgumentTypes(call.desc))
           // This is the type where method lookup starts (implemented in byteCodeRepository.methodNode)
-          val (preciseOwner, receiverIsExactType) =
-            if (isStaticCallsite(call)) (call.owner, false)
-            else if (isSuperCall) (definingClass.info.get.superClass.get.internalName, false)
-            else if (call.getOpcode == Opcodes.INVOKESPECIAL) (call.owner, false)
+          val (preciseOwner, receiverIsExactType, narrowedReceiverType, needsDevirtualizedCast) =
+            if (isStaticCallsite(call)) (call.owner, false, Option.empty[String], false)
+            else if (isSuperCall) (definingClass.info.get.superClass.get.internalName, false, Option.empty[String], false)
+            else if (call.getOpcode == Opcodes.INVOKESPECIAL) (call.owner, false, Option.empty[String], false)
             else {
               // invokevirtual, invokeinterface: start search at the type of the receiver
               val numParams = paramTps.get.length
-              val isExact = typeAnalyzer.receiverHasExactType(call, numParams)
               val f = typeAnalyzer.frameAt(call)
-              (f.peekStack(numParams).getType.getInternalName, isExact)
+              val receiverValue = f.peekStack(numParams)
+              val typeName = receiverValue.getType.getInternalName
+              receiverValue match {
+                case _: InterproceduralExactTypeValue =>
+                  // Interprocedural type: JVM doesn't know precise type, CHECKCAST needed
+                  (typeName, true, Option.empty[String], typeName != call.owner)
+                case _: ExactTypeValue =>
+                  // JVM-compatible exact type (from NEW or GETSTATIC MODULE$)
+                  (typeName, true, Option.empty[String], false)
+                case _: NarrowedTypeValue =>
+                  // Interprocedural narrowed type: always needs CHECKCAST if different from instruction owner
+                  (typeName, false, Some(typeName), typeName != call.owner)
+                case _ =>
+                  (typeName, false, Option.empty[String], false)
+              }
             }
 
           val callee: Either[OptimizerWarning, Callee] = {
@@ -184,7 +211,7 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
             } yield {
               val declarationClassBType = classBTypeFromClassNode(declarationClassNode)
               val info =
-                analyzeCallsite(method, declarationClassBType, call, paramTps, calleeSourceFilePath, definingClass, receiverIsExactType)
+                analyzeCallsite(method, declarationClassBType, call, paramTps, calleeSourceFilePath, definingClass, receiverIsExactType, narrowedReceiverType)
               import info._
               Callee(
                 callee = method,
@@ -195,7 +222,7 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
                 annotatedNoInline = annotatedNoInline,
                 samParamTypes = info.samParamTypes,
                 calleeInfoWarning = warning,
-                isDevirtualized = devirtualized
+                isDevirtualized = devirtualized || needsDevirtualizedCast
               )
             }
           }
@@ -341,7 +368,8 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
       paramTps: FLazy[Array[Type]],
       calleeSourceFilePath: Option[String],
       callsiteClass: ClassBType,
-      receiverIsExactType: Boolean = false
+      receiverIsExactType: Boolean = false,
+      narrowedReceiverType: Option[String] = None
   ): CallsiteInfo = {
     val methodSignature = (calleeMethodNode.name, calleeMethodNode.desc)
 
@@ -373,12 +401,15 @@ class CallGraph[PP <: PostProcessor](val postProcessor: PP) {
           //
           // (3) If the receiver's exact runtime type is known (e.g. from a NEW instruction),
           // the call can be statically resolved regardless of whether the class or method is final.
+          // (4) If the receiver's type is narrowed (from interprocedural analysis) and
+          // no subclass of the narrowed type overrides the method, the call can be resolved.
           val isStaticallyResolved: Boolean = {
             isStaticCallsite(call) ||
             (call.getOpcode == Opcodes.INVOKESPECIAL && receiverType == callsiteClass) || // (1)
             methodInlineInfo.effectivelyFinal ||
             receiverType.info.orThrow.inlineInfo.isEffectivelyFinal || // (2)
-            receiverIsExactType // (3)
+            receiverIsExactType || // (3)
+            narrowedReceiverType.exists(nrt => isMethodFinalForNarrowedType(nrt, call.name, call.desc)) // (4)
           }
 
           val warning = calleeDeclarationClassBType.info.orThrow.inlineInfo.warning.map(

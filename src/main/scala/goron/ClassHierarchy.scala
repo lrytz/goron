@@ -41,6 +41,17 @@ case class ClassHierarchy(
   /** O(1) method existence check. */
   def hasMethod(className: String, name: String, desc: String): Boolean =
     methodIndex.get(className).exists(_.contains((name, desc)))
+
+  /** Check if any transitive subclass of `className` declares a method with the given name and desc. */
+  def hasOverrideInSubclasses(className: String, methodName: String, methodDesc: String): Boolean = {
+    def check(cls: String): Boolean = {
+      subclasses.getOrElse(cls, Set.empty).exists { sub =>
+        val hasOverride = methodIndex.get(sub).exists(_.contains((methodName, methodDesc)))
+        hasOverride || check(sub)
+      }
+    }
+    check(className)
+  }
 }
 
 object ClassHierarchy {

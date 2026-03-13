@@ -8,13 +8,13 @@
 package goron.optimizer.analysis
 
 import goron.optimizer.BTypes.InternalName
-import goron.optimizer.analysis.BackendUtils.LambdaMetaFactoryCall
+  import goron.optimizer.analysis.BackendUtils.{LambdaMetaFactoryCall, isModuleLoad}
 import goron.optimizer.analysis.TypeFlowInterpreter._
 import goron.optimizer.opt.BytecodeUtils._
 
 import scala.annotation.tailrec
 import scala.tools.asm.tree.analysis.{Analyzer, BasicInterpreter, BasicValue}
-import scala.tools.asm.tree.{AbstractInsnNode, InsnNode, MethodInsnNode, MethodNode, TypeInsnNode}
+import scala.tools.asm.tree.{AbstractInsnNode, FieldInsnNode, InsnNode, MethodInsnNode, MethodNode, TypeInsnNode}
 import scala.tools.asm.{Opcodes, Type}
 
 abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opcodes.ASM7) {
@@ -34,7 +34,13 @@ abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opco
 
   override def newOperation(insn: AbstractInsnNode): BasicValue = insn.getOpcode match {
     case Opcodes.NEW => new ExactTypeValue(Type.getObjectType(insn.asInstanceOf[TypeInsnNode].desc))
-    case _           => super.newOperation(insn)
+    case Opcodes.GETSTATIC =>
+      val fi = insn.asInstanceOf[FieldInsnNode]
+      if (isModuleLoad(fi, _ == fi.owner))
+        new ExactTypeValue(Type.getObjectType(fi.owner))
+      else
+        super.newOperation(insn)
+    case _ => super.newOperation(insn)
   }
 
   override def unaryOperation(insn: AbstractInsnNode, value: BasicValue): BasicValue = insn.getOpcode match {
@@ -42,8 +48,9 @@ abstract class TypeFlowInterpreter extends BasicInterpreter(scala.tools.asm.Opco
       // Preserve exact type through casts: if we know the value is exactly A and A conforms to
       // the cast target B, the value is still exactly A after the cast.
       value match {
-        case ev: ExactTypeValue => ev
-        case _                  => super.unaryOperation(insn, value)
+        case _: ExactTypeValue    => value
+        case _: NarrowedTypeValue => value
+        case _                    => super.unaryOperation(insn, value)
       }
     case _ => super.unaryOperation(insn, value)
   }
@@ -94,7 +101,8 @@ object TypeFlowInterpreter {
             case _                => false
           }
         case _: LMFValue      => other.isInstanceOf[LMFValue] && super.equals(other)
-        case _: ExactTypeValue => other.isInstanceOf[ExactTypeValue] && super.equals(other)
+        case _: ExactTypeValue   => other.isInstanceOf[ExactTypeValue] && super.equals(other)
+        case _: NarrowedTypeValue => other.isInstanceOf[NarrowedTypeValue] && super.equals(other)
         case pv: ParamValue   =>
           other.isInstanceOf[ParamValue] && pv.local == other.asInstanceOf[ParamValue].local && super.equals(other)
         case _ =>
@@ -134,6 +142,14 @@ object TypeFlowInterpreter {
   // the class is not final, because we know the precise runtime type.
   // Note: merging two ExactTypeValue with different types strips the exact flag.
   class ExactTypeValue(tpe: Type) extends SpecialAwareBasicValue(tpe) with SpecialValue
+
+  // A value whose type is more precise than the declared type (from interprocedural
+  // analysis), but not necessarily the exact runtime type. For example, if we know a
+  // method returns List (but it could be :: or Nil), the value is NarrowedTypeValue(List).
+  // This enables devirtualization when the method has no overrides in the narrowed type's
+  // subclass hierarchy.
+  // Note: merging two NarrowedTypeValue with different types strips the narrowed flag.
+  class NarrowedTypeValue(tpe: Type) extends SpecialAwareBasicValue(tpe) with SpecialValue
 }
 
 /** A [[TypeFlowInterpreter]] which collapses LUBs of non-equal reference types to Object. This could be made more
@@ -143,8 +159,11 @@ class NonLubbingTypeFlowInterpreter extends TypeFlowInterpreter {
   def refLub(a: BasicValue, b: BasicValue): BasicValue = ObjectValue
 }
 
-class NonLubbingTypeFlowAnalyzer(methodNode: MethodNode, classInternalName: InternalName)
-    extends AsmAnalyzer(methodNode, classInternalName, new Analyzer(new NonLubbingTypeFlowInterpreter)) {
+class NonLubbingTypeFlowAnalyzer(
+    methodNode: MethodNode,
+    classInternalName: InternalName,
+    interpreter: TypeFlowInterpreter = new NonLubbingTypeFlowInterpreter
+) extends AsmAnalyzer(methodNode, classInternalName, new Analyzer(interpreter)) {
   // see [[AaloadValue]]
   def preciseAaloadTypeDesc(value: BasicValue): String = value match {
     case aaloadValue: AaloadValue =>

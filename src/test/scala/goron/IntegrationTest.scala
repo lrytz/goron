@@ -318,11 +318,13 @@ class IntegrationTest extends GoronTesting {
         |  def main(args: Array[String]): Unit = {
         |    val a = new A()
         |    println(a.f)
+        |    val b = new B()
+        |    println(b.f)
         |  }
         |}
       """.stripMargin
     val survivors = compileAndRunFullPipeline(code, Set("Main"))
-    assertEquals(runMain(survivors), "42")
+    assertEquals(runMain(survivors), "42\n99")
 
     val mainClass = findClass(survivors, "Main$")
     val mainMethod = getMethod(mainClass, "main")
@@ -330,13 +332,15 @@ class IntegrationTest extends GoronTesting {
     assertDoesNotInvoke(mainMethod, "f")
   }
 
-  test("issue: Seq.newBuilder.result().map — needs interprocedural type analysis") {
-    // Seq delegates to List, and List.map is final. But the static type of
-    // Seq.newBuilder[Int].result() is Seq (interface), so map can't be resolved.
-    // Requires demand-driven interprocedural type analysis:
-    //   Seq.newBuilder → Delegate.newBuilder → List.newBuilder → new ListBuffer()
-    //   ListBuffer.result() → List
-    //   List.map is final → statically resolved
+  test("Seq.newBuilder.result().map devirtualized via interprocedural type analysis") {
+    // Seq delegates to List, and List.map is final. The static type of
+    // Seq.newBuilder[Int].result() is Seq (interface), so map can't be resolved
+    // without interprocedural type analysis. The analysis traces:
+    //   package$.Seq → Seq$ (GETSTATIC MODULE$)
+    //   Seq$.newBuilder → Delegate.newBuilder → delegate.newBuilder (field tracking: delegate=List$)
+    //   List$.newBuilder → new ListBuffer() (ExactType)
+    //   ListBuffer.result() → List (declared return type, NarrowedType)
+    //   List.map is not overridden by :: or Nil → statically resolved
     val code =
       """object Main {
         |  def main(args: Array[String]): Unit = {
@@ -352,11 +356,15 @@ class IntegrationTest extends GoronTesting {
 
     val mainClass = findClass(survivors, "Main$")
     val mainMethod = getMethod(mainClass, "main")
-    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
-    // Currently map is called via interface dispatch. After interprocedural type analysis,
-    // it should be inlined since List.map is final.
-    assertInvoke(mainMethod, "scala/collection/IterableOps", "map")
-    // TODO: assertDoesNotInvoke(mainMethod, "map")
+    // map should no longer be called via IterableOps interface dispatch
+    val hasIterableOpsMap = mainMethod.instructions.exists {
+      case i: Invoke => i.owner == "scala/collection/IterableOps" && i.name == "map"
+      case _         => false
+    }
+    assert(!hasIterableOpsMap, {
+      val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}${i.desc}" }
+      s"map should be devirtualized, not called via IterableOps interface dispatch. Invocations:\n${invokes.mkString("\n  ")}"
+    })
   }
 
   // --- Collection pipeline tests ---
@@ -420,12 +428,11 @@ class IntegrationTest extends GoronTesting {
     assert(!invokes.exists(_.contains("anonfun")), s"Closure body method should be inlined, got: $invokes")
   }
 
-  test("issue: filter not inlined — interface dispatch blocks devirtualization") {
+  test("filter devirtualized via interprocedural type analysis") {
     // filter is called on the result of map, which has static type IndexedSeq (interface).
-    // The inliner requires isStaticallyResolved for safeToInline, which fails for
-    // interface calls. Even closed-world analysis can't help because IndexedSeq has
-    // multiple implementations. Would need type flow analysis to know that
-    // IndexedSeq$.newBuilder().result() returns a specific concrete type (Vector).
+    // Interprocedural type analysis traces through IndexedSeq$.newBuilder().result() to
+    // determine the concrete type is Vector. Since no subclass of Vector overrides filter,
+    // the call is statically resolved and can be inlined.
     val code =
       """object Main {
         |  def main(args: Array[String]): Unit = {
@@ -439,13 +446,13 @@ class IntegrationTest extends GoronTesting {
 
     val mainClass = findClass(survivors, "Main$")
     val mainMethod = getMethod(mainClass, "main")
-    println(decompileClass(survivors, mainClass))
 
-    // filter is still called via interface dispatch
-    val invokes = mainMethod.instructions.collect { case i: Invoke => s"${i.owner}.${i.name}" }
-    println(s"=== Remaining invocations: ${invokes.mkString(", ")} ===")
-    assertInvoke(mainMethod, "scala/collection/immutable/IndexedSeq", "filter")
-    // TODO: after fixing, filter's loop should be inlined and assertDoesNotInvoke(mainMethod, "filter")
+    // filter is devirtualized — no longer called via IndexedSeq interface dispatch
+    val hasIndexedSeqFilter = mainMethod.instructions.exists {
+      case i: Invoke => i.owner == "scala/collection/immutable/IndexedSeq" && i.name == "filter"
+      case _         => false
+    }
+    assert(!hasIndexedSeqFilter, "filter should not be called via IndexedSeq interface dispatch")
   }
 
   test("issue: boxing in map loop — unboxToInt/Integer.valueOf") {

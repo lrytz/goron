@@ -83,7 +83,7 @@ object Goron {
     val reporter =
       if (config.verbose) BackendReporting.ConsoleReporter
       else BackendReporting.SilentReporter
-    val pp = new PostProcessor(settings, classpath, reporter, singleImplMethods)
+    val pp = new PostProcessor(settings, classpath, reporter, singleImplMethods, Some(hierarchy))
 
     // Add reachable classes as "compiling" (inliner will optimize these),
     // unreachable classes as "parsed" (available for type resolution only)
