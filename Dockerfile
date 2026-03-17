@@ -30,7 +30,8 @@ RUN curl -fsSL "https://get.sdkman.io" | bash
 
 RUN bash -c "source /home/node/.sdkman/bin/sdkman-init.sh && \
   sdk install java $(sdk list java | grep -oP '25(\.[0-9]+)*-tem' | head -n 1) && \
-  sdk install sbt"
+  sdk install sbt && \
+  sdk install scalacli"
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
