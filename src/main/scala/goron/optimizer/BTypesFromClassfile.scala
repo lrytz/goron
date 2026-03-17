@@ -179,6 +179,7 @@ class BTypesFromClassfile[PP <: PostProcessor](val postProcessor: PP) {
       val methodInfos = new mutable.TreeMap[(String, String), MethodInlineInfo]()
       classNode.methods.forEach(methodNode => {
         val info = MethodInlineInfo(
+          // TODO: do we benefit here from `BytecodeUtils.isFinalClass(classNode) || ...`
           effectivelyFinal = BytecodeUtils.isFinalMethod(methodNode),
           annotatedInline = false,
           annotatedNoInline = false

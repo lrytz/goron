@@ -11,45 +11,12 @@ it to be effectively final.
 through stores, loads, and casts. `CallGraph.isStaticallyResolved` uses this to
 devirtualize calls when the exact type is known.
 
-**Remaining: demand-driven interprocedural type analysis.** When the inliner wants to
-inline a call but `isStaticallyResolved` is false (e.g., interface dispatch), trace
-backwards through the receiver's definition chain to determine its concrete type, crossing
-method boundaries as needed.
-
-Example: `val b = Seq.newBuilder[Int]; b += 10; b.result().map(_ + 1)`.
-The inliner wants to inline `map` (higher-order call with literal lambda). The static type
-of `b.result()` is `Seq`, so `map` can't be resolved. Analysis:
-
-1. Goal: know the return type of `b.result()`. Look up that method — it's the abstract
-   `Builder.result`. We need to know which override, so determine the precise type of `b`.
-2. `b` is the result of `Seq.newBuilder[Int]`. The receiver `Seq` is `object Seq`, which
-   extends `SeqFactory.Delegate(List)`. So `Seq.newBuilder` resolves to `Delegate.newBuilder`.
-3. Look inside `Delegate.newBuilder`: it calls `delegate.newBuilder`. The `delegate` field
-   is set in `Delegate`'s constructor, and the receiver is `object Seq` (known singleton),
-   so `delegate` is `object List`.
-4. `List.newBuilder` returns `new ListBuffer()`. So `b` has type `ListBuffer`.
-5. Look up `ListBuffer.result()`: returns `List`. So `b.result()` has type `List`.
-6. `List` is sealed with two final subclasses (`::` and `Nil`), and neither overrides `map`.
-   So `List.map` is statically resolved and can be inlined.
-
-This is a form of **demand-driven interprocedural type analysis**. Related work:
-- Sundaresan et al., "Practical Virtual Method Call Resolution for Java" (OOPSLA 2000) —
-  Variable Type Analysis (VTA), propagation-based type tracking through assignments,
-  parameters, and returns.
-- Sridharan & Bodík, "Refinement-Based Context-Sensitive Points-To Analysis for Java"
-  (PLDI 2006) — demand-driven backward tracing from a query site, using CFL-reachability.
-- Scala.js linker optimizer — does exactly this kind of type tracking on its tree-based IR.
-
-Key design decisions for goron:
-- **Demand-driven**: triggered only when the inliner has a callsite it wants to resolve,
-  not a whole-program analysis. Limits scope and cost.
-- **Interprocedural**: uses `byteCodeRepository.methodNode` to look inside callee bodies
-  (all classfiles are available).
-- **Singleton field tracking**: for Scala objects (`MODULE$`), track constructor parameter →
-  field assignment to determine field values.
-- **Depth-limited**: set a bound on interprocedural tracing depth (e.g., 5 levels).
-- **Cached**: memoize per (class, method, desc) → return type to avoid redundant analysis.
-- **Works on bytecode**: use `ProdConsAnalyzer` for backward tracing through the stack.
+**Done:** demand-driven interprocedural type analysis (`InterproceduralTypeAnalyzer`).
+Traces return types through method bodies, tracks singleton field values through constructor
+chains, and uses `ClassHierarchy.hasOverrideInSubclasses` for narrowed-type devirtualization.
+Three-level type lattice: `ExactTypeValue` (JVM-verifiable), `InterproceduralExactTypeValue`
+(exact but needs CHECKCAST), `NarrowedTypeValue` (upper bound, resolved if no override).
+Handles the full `Seq.newBuilder.result().map` chain and the `(1 to 10).map.filter` pattern.
 
 ### Generalized stack allocation / scalar replacement
 
@@ -99,6 +66,15 @@ access flag, the `values()` / `valueOf()` synthetic methods, or the superclass
 `java.lang.Enum`). Discovered via `Scala3Bench` where the Scala 3 compiler uses
 `EnumSet.of(UseScope.Default)` during initialization. Current workaround: add enum classes
 as entry points so they're retained as-is.
+
+### `effectivelyFinal` in `BTypesFromClassfile` should check class finality
+
+`BTypesFromClassfile.classBTypeFromParsedClassfile` sets `effectivelyFinal` on
+`MethodInlineInfo` using only `BytecodeUtils.isFinalMethod(methodNode)`. This misses
+that all methods in a `final` class are effectively final. Checking
+`BytecodeUtils.isFinalClass(classNode) || isFinalMethod(methodNode)` would mark more
+methods as statically resolvable, enabling more inlining without interprocedural analysis.
+See `BTypesFromClassfile.scala:182`.
 
 ### Improve error handling in LUB computation and external class loading
 
@@ -152,14 +128,11 @@ prove it non-null, so the null check remained, keeping the closure alive. Fix: r
 `NotNullValue` for `LambdaMetaFactoryCall` in `NullnessInterpreter.naryOperation`. This
 enables the chain: null-check elimination → push-pop → stale store → closure removal.
 
-**2. filter/sum not inlined — interface dispatch blocks devirtualization**
-(`issue: filter not inlined...`)
-`map` returns static type `IndexedSeq` (an interface). Calls to `filter` and `sum` on this
-result are `INVOKEINTERFACE`, which fails `isStaticallyResolved` in the call graph. Even
-closed-world analysis can't help because `IndexedSeq` has multiple implementations.
-Requires the demand-driven interprocedural type analysis described in "Inline virtual calls
-with known exact type" above to trace through `IndexedSeq$.newBuilder().result()` → `Vector`.
-Note: `sum` faces the same interface dispatch barrier as `filter`.
+**2. filter/sum not inlined — interface dispatch blocks devirtualization** — FIXED (filter).
+Interprocedural type analysis traces `IndexedSeq$.newBuilder().result()` → `Vector`, and
+`hasOverrideInSubclasses` confirms no subclass of `Vector` overrides `filter`. The call is
+now statically resolved and inlined. `sum` faces the same barrier but goes through
+`IterableOnceOps` — not yet resolved.
 
 **3. Boxing in map loop** (`issue: boxing in map loop...`)
 The inlined map loop iterates via `Iterator[Object]`, unboxes to `int` with
