@@ -16,6 +16,9 @@ import scala.jdk.CollectionConverters._
   * build server would behave.
   *
   * Run with: sbt "bench/Jmh/run ScalacHotBench"
+  *
+  * To use a custom compiler (e.g., built without the 2.13 optimizer):
+  *   -p compilerJarsDir=sandbox/2.13.19-bin-c7f0f2b-SNAPSHOT
   */
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -28,7 +31,11 @@ class ScalacHotBench {
   @Param(Array("hello", "scalap"))
   var sourceType: String = _
 
-  private val scalaVersion = "2.13.18"
+  /** If set, load compiler jars from this directory instead of resolving from Maven. */
+  @Param(Array(""))
+  var compilerJarsDir: String = _
+
+  private val defaultScalaVersion = "2.13.18"
 
   private var stockCl: URLClassLoader = _
   private var goronCl: URLClassLoader = _
@@ -41,7 +48,18 @@ class ScalacHotBench {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    val compilerJars = BenchmarkUtils.resolve(s"org.scala-lang:scala-compiler:$scalaVersion")
+    val compilerJars = if (compilerJarsDir != null && compilerJarsDir.nonEmpty) {
+      val dir = new File(compilerJarsDir)
+      if (!dir.isDirectory) throw new RuntimeException(s"Not a directory: $compilerJarsDir")
+      val jars = dir.listFiles().filter(_.getName.endsWith(".jar"))
+      if (jars.isEmpty) throw new RuntimeException(s"No jar files found in $compilerJarsDir")
+      println(s"Using ${jars.length} jars from $compilerJarsDir")
+      jars
+    } else {
+      BenchmarkUtils.resolve(s"org.scala-lang:scala-compiler:$defaultScalaVersion")
+    }
+
+    val scalaVersion = ScalacBenchUtils.detectScalaVersion(compilerJars, defaultScalaVersion)
 
     val optimizedJar = BenchmarkUtils.optimizeJars(
       compilerJars,
@@ -103,7 +121,10 @@ class ScalacColdBench {
   @Param(Array("hello", "scalap"))
   var sourceType: String = _
 
-  private val scalaVersion = "2.13.18"
+  @Param(Array(""))
+  var compilerJarsDir: String = _
+
+  private val defaultScalaVersion = "2.13.18"
 
   private var compilerJars: Array[File] = _
   private var optimizedJar: File = _
@@ -114,7 +135,15 @@ class ScalacColdBench {
 
   @Setup(Level.Trial)
   def setup(): Unit = {
-    compilerJars = BenchmarkUtils.resolve(s"org.scala-lang:scala-compiler:$scalaVersion")
+    compilerJars = if (compilerJarsDir != null && compilerJarsDir.nonEmpty) {
+      val dir = new File(compilerJarsDir)
+      if (!dir.isDirectory) throw new RuntimeException(s"Not a directory: $compilerJarsDir")
+      dir.listFiles().filter(_.getName.endsWith(".jar"))
+    } else {
+      BenchmarkUtils.resolve(s"org.scala-lang:scala-compiler:$defaultScalaVersion")
+    }
+
+    val scalaVersion = ScalacBenchUtils.detectScalaVersion(compilerJars, defaultScalaVersion)
 
     optimizedJar = BenchmarkUtils.optimizeJars(
       compilerJars,
@@ -169,6 +198,22 @@ class ScalacColdBench {
 }
 
 private[apps] object ScalacBenchUtils {
+
+  /** Detect the Scala version from jar filenames or manifest. */
+  def detectScalaVersion(jars: Array[File], fallback: String): String = {
+    // Try versioned jar name first (e.g., scala-library-2.13.18.jar)
+    jars.find(_.getName.startsWith("scala-library-")).flatMap { f =>
+      val name = f.getName.stripSuffix(".jar").stripPrefix("scala-library-")
+      if (name.nonEmpty) Some(name) else None
+    }.getOrElse {
+      // Fall back to reading Implementation-Version from the scala-library manifest
+      jars.find(f => f.getName == "scala-library.jar" || f.getName.startsWith("scala-library-")).flatMap { f =>
+        val jar = new JarFile(f)
+        try Option(jar.getManifest).flatMap(m => Option(m.getMainAttributes.getValue("Implementation-Version")))
+        finally jar.close()
+      }.getOrElse(fallback)
+    }
+  }
 
   def createSources(sourceType: String, compilerJars: Array[File], scalaVersion: String): (Array[Path], Path, String) = {
     val scalaLibrary = compilerJars
