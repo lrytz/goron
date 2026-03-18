@@ -13,6 +13,8 @@ import java.util.concurrent.TimeUnit
   * to compile source files.
   *
   * Run with: sbt "bench/Jmh/run Scala3CompilerHotBench"
+  *   -p sourceType=hello      (default, tiny program)
+  *   -p sourceType=scalaYaml  (7.7K LoC YAML parser, no external deps)
   */
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -36,7 +38,7 @@ class Scala3CompilerHotBench {
   private var sourceFiles: Array[Path] = _
   private var sourceDir: Path = _
   private var outputDir: Path = _
-  private var compilationClasspath: String = _
+  private var compilerArgs: Array[String] = _
 
   @Setup(Level.Trial)
   def setup(): Unit = {
@@ -58,10 +60,10 @@ class Scala3CompilerHotBench {
     goronModule = goronMainClass.getField("MODULE$").get(null)
     goronProcessMethod = goronMainClass.getMethod("process", classOf[Array[String]])
 
-    val (files, dir, cp) = createSources(sourceType, compilerJars)
-    sourceFiles = files
-    sourceDir = dir
-    compilationClasspath = cp
+    val sourceSetup = Scala3BenchSources.create(sourceType, compilerJars, scala3Version)
+    sourceFiles = sourceSetup.files
+    sourceDir = sourceSetup.tmpDir
+    compilerArgs = sourceSetup.compilerArgs
 
     outputDir = Files.createTempDirectory("scala3-bench-out")
   }
@@ -81,39 +83,13 @@ class Scala3CompilerHotBench {
 
   @Benchmark
   def stock(): Unit = {
-    val args = Array("-cp", compilationClasspath, "-d", outputDir.toString) ++ sourceFiles.map(_.toString)
+    val args = compilerArgs ++ Array("-d", outputDir.toString) ++ sourceFiles.map(_.toString)
     stockProcessMethod.invoke(stockModule, args)
   }
 
   @Benchmark
   def goron(): Unit = {
-    val args = Array("-cp", compilationClasspath, "-d", outputDir.toString) ++ sourceFiles.map(_.toString)
+    val args = compilerArgs ++ Array("-d", outputDir.toString) ++ sourceFiles.map(_.toString)
     goronProcessMethod.invoke(goronModule, args)
-  }
-
-  private def createSources(sourceType: String, compilerJars: Array[File]): (Array[Path], Path, String) = {
-    val cpJars = compilerJars.filter { f =>
-      val name = f.getName
-      name.contains("scala-library") || name.contains("scala3-library")
-    }
-    val cp = cpJars.map(_.getAbsolutePath).mkString(File.pathSeparator)
-
-    sourceType match {
-      case "hello" =>
-        val dir = Files.createTempDirectory("scala3-bench-src")
-        val file = dir.resolve("Hello.scala")
-        Files.writeString(
-          file,
-          """@main def hello(): Unit =
-            |  println("Hello, World!")
-            |  val xs = (1 to 100).map(_ * 2).filter(_ > 50)
-            |  println(xs.sum)
-            |""".stripMargin
-        )
-        (Array(file), dir, cp)
-
-      case other =>
-        throw new IllegalArgumentException(s"Unknown source type: $other")
-    }
   }
 }

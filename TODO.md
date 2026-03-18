@@ -153,3 +153,8 @@ equivalent mechanism, or whether goron needs to derive inline info from the clas
 
 Investigate what goron does in the Scala3CompilerBench. Performance seems exactly the same with
 and without.
+
+### Apply cleanup commits from scala/scala3#25165
+
+Review https://github.com/scala/scala3/pull/25165 for cleanup commits that can be applied to
+goron's copy of the Scala 2 backend code. For example, the removal of `RightBiasedEither`.
