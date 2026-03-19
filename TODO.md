@@ -158,3 +158,19 @@ and without.
 
 Review https://github.com/scala/scala3/pull/25165 for cleanup commits that can be applied to
 goron's copy of the Scala 2 backend code. For example, the removal of `RightBiasedEither`.
+
+### Learn from GraalVM JIT optimizations
+
+Study GraalVM's Graal compiler for optimization passes and analyses that could be added or
+improved in goron. Graal operates on a sea-of-nodes IR and does many of the same optimizations
+goron targets (inlining, escape analysis, devirtualization) but with more sophisticated
+implementations. Look for research papers, especially:
+- Duboscq et al., "An Intermediate Representation for Speculative Optimizations in a
+  Dynamic Compiler" (2013) — Graal IR design
+- Stadler et al., "Partial Escape Analysis and Scalar Replacement for Java" (2014) —
+  relevant to generalized scalar replacement in goron
+- Wimmer & Franz, "Linear Scan Register Allocation on SSA Form" (2010)
+- Sewe et al., "Da Capo Con Spirito: Benchmarking JVM Implementations" (2011)
+
+GraalVM JIT source code is on GitHub but GPL, so we're not allowed to use it.
+https://github.com/oracle/graal/blob/master/compiler/src/jdk.graal.compiler/src/jdk/graal/compiler/core/phases/CEOptimization.java
