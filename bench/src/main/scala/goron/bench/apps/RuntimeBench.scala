@@ -18,12 +18,12 @@ import java.util.concurrent.TimeUnit
   *
   * Run with: sbt "bench/Jmh/run RuntimeBench"
   */
-@BenchmarkMode(Array(Mode.SingleShotTime))
+@BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
-@Warmup(iterations = 20, batchSize = 10)
-@Measurement(iterations = 20, batchSize = 10)
-@Fork(value = 1, jvmArgs = Array("-Xmx2g", "-Xms2g"))
+@Warmup(iterations = 5, time = 3)
+@Measurement(iterations = 5, time = 3)
+@Fork(value = 2, jvmArgs = Array("-Xmx2g", "-Xms2g"))
 class RuntimeBench {
 
   private var stockCl: URLClassLoader = _
