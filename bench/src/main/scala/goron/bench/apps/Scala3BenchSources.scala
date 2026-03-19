@@ -26,13 +26,13 @@ object Scala3BenchSources {
     val cp = stdlibClasspath(compilerJars)
     val dir = Files.createTempDirectory("scala3-bench-src")
     val file = dir.resolve("Hello.scala")
-    Files.writeString(
+    Files.write(
       file,
       """@main def hello(): Unit =
         |  println("Hello, World!")
         |  val xs = (1 to 100).map(_ * 2).filter(_ > 50)
         |  println(xs.sum)
-        |""".stripMargin
+        |""".stripMargin.getBytes
     )
     Scala3BenchSources(
       files = Array(file),
@@ -103,7 +103,7 @@ object Scala3BenchSources {
         }
       }
 
-      Files.writeString(marker.toPath, "ok")
+      Files.write(marker.toPath, "ok".getBytes)
       println(s"scala-yaml sources cached at ${scalaYamlCacheDir.getAbsolutePath}")
     } finally {
       ScalacBenchUtils.deleteRecursive(tmpClone)

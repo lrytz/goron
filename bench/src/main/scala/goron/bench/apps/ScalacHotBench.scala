@@ -224,7 +224,7 @@ private[apps] object ScalacBenchUtils {
       case "hello" =>
         val dir = Files.createTempDirectory("scalac-bench-src")
         val file = dir.resolve("Hello.scala")
-        Files.writeString(
+        Files.write(
           file,
           """object Hello {
             |  def main(args: Array[String]): Unit = {
@@ -233,7 +233,7 @@ private[apps] object ScalacBenchUtils {
             |    println(xs.sum)
             |  }
             |}
-            |""".stripMargin
+            |""".stripMargin.getBytes
         )
         (Array(file), dir, scalaLibrary.getAbsolutePath)
 

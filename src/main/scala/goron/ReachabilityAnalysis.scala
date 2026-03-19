@@ -103,7 +103,7 @@ object ReachabilityAnalysis {
             .getResourceAsStream(internalName + ".class")
           if (stream == null) return Set.empty
           val bytes =
-            try stream.readAllBytes()
+            try Util.readAllBytes(stream)
             finally stream.close()
           val cr = new asm.ClassReader(bytes)
           val methods = mutable.Set.empty[(String, String)]

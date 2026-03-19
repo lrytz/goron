@@ -42,7 +42,7 @@ class Scala3IntegrationTest extends GoronTesting {
     val tmpDir = Files.createTempDirectory("goron-scala3-test")
     try {
       val srcFile = tmpDir.resolve("Main.scala")
-      Files.writeString(srcFile, code)
+      Files.write(srcFile, code.getBytes)
       val outDir = tmpDir.resolve("out")
       Files.createDirectory(outDir)
 

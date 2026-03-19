@@ -7,6 +7,22 @@
 
 package goron
 
+import java.io.{ByteArrayOutputStream, InputStream}
+
+private[goron] object Util {
+  /** Read all bytes from an InputStream. Compatible with Java 8 (no InputStream.readAllBytes). */
+  def readAllBytes(in: InputStream): Array[Byte] = {
+    val buf = new ByteArrayOutputStream()
+    val tmp = new Array[Byte](8192)
+    var n = in.read(tmp)
+    while (n != -1) {
+      buf.write(tmp, 0, n)
+      n = in.read(tmp)
+    }
+    buf.toByteArray
+  }
+}
+
 trait Classpath {
   def findClassBytes(internalName: String): Option[Array[Byte]]
   def classNames: Set[String]
@@ -50,7 +66,7 @@ class RuntimeClasspath(primary: Classpath, classLoader: ClassLoader = ClassLoade
     if (stream == null) None
     else {
       try {
-        val bytes = stream.readAllBytes()
+        val bytes = Util.readAllBytes(stream)
         Some(bytes)
       } finally {
         stream.close()
