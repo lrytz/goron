@@ -174,3 +174,41 @@ implementations. Look for research papers, especially:
 
 GraalVM JIT source code is on GitHub but GPL, so we're not allowed to use it.
 https://github.com/oracle/graal/blob/master/compiler/src/jdk.graal.compiler/src/jdk/graal/compiler/core/phases/CEOptimization.java
+
+### Benchmark impact of ignoring ScalaInlineInfo
+
+Add a mode to goron where it ignores the `ScalaInlineInfo` classfile attribute entirely,
+falling back to bytecode-derived info (access flags, etc.) for all classes — the same
+path Scala 3 classfiles take today. Compare benchmark results with and without the
+attribute to determine whether `ScalaInlineInfo` provides meaningful optimization benefit
+and whether it should be added to Scala 3 classfiles.
+
+`InlineInfo` carries more than just `effectivelyFinal`:
+- **SAM type detection**: whether a class is a single-abstract-method type, used by the
+  inliner to identify higher-order method calls with closure arguments
+- **`@inline`/`@noinline` annotations**: method-level hints that influence inliner
+  heuristics (priority and suppression)
+- **`effectivelyFinal`**: the Scala compiler knows more than `ACC_FINAL` (sealed
+  hierarchies, private methods, methods in objects) — but goron's closed-world analysis
+  and `isFinalClass` check (see TODO above) may recover most of this independently
+
+### Specialization
+
+Scala 2 has `@specialized` annotation support in the compiler, generating type-specific
+variants of generic classes/methods to avoid boxing. This is limited to a fixed set of
+primitive types and produces a combinatorial explosion of generated classes. Goron could
+potentially do specialization at link time more selectively — only generating specialized
+variants for type arguments that are actually used in the program (demand-driven).
+
+Scala 3 dropped general `@specialized` support but retains built-in specialization for
+`Function` types (and possibly `Tuple`). A link-time specializer could fill this gap for
+Scala 3 without requiring compiler changes, and could go further than the Scala 2 approach
+by specializing arbitrary classes based on closed-world type usage analysis.
+
+Key questions:
+- Can we specialize after erasure, working on bytecode? The type info is gone, but
+  call sites with `Integer.valueOf`/`unboxToInt` patterns reveal the original types.
+- Is it more practical to specialize individual hot methods (monomorphization) rather
+  than entire classes?
+- How does this interact with the existing `BoxUnbox` pass — specialization eliminates
+  boxing at the source, while BoxUnbox eliminates it after the fact.
