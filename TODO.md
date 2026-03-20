@@ -94,7 +94,11 @@ Silent catch-all handlers mask real errors:
 Per-class local optimizations and serialization have no shared mutable state and can run
 in parallel (e.g., via `parallel collections` or a thread pool).
 
-### Create an sbt plugin
+### Create an sbt plugin — DONE (initial version)
+
+`sbt-plugin/` contains `sbt-goron`, an sbt plugin that extends sbt-assembly. The
+`goronAssembly` task runs `assembly` first, then optimizes the fat jar with goron in a
+forked JVM. See `sbt-plugin/src/main/scala/goron/sbt/GoronPlugin.scala`.
 
 ### Better Java module system handling
 
