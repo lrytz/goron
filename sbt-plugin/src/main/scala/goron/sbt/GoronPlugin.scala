@@ -11,6 +11,9 @@ import sbtassembly.AssemblyPlugin.autoImport._
   * applies goron link-time optimization (inlining, closure elimination, DCE)
   * to the assembled fat jar.
   *
+  * Goron is resolved automatically from the local Ivy/Maven repository.
+  * Publish goron locally first: `cd goron && sbt publishLocal`
+  *
   * Usage in build.sbt:
   * {{{
   * enablePlugins(GoronPlugin)
@@ -25,10 +28,12 @@ object GoronPlugin extends AutoPlugin {
   override def requires = AssemblyPlugin
   override def trigger = noTrigger // must be explicitly enabled
 
+  val GoronConfig = config("goron").hide
+
   object autoImport {
     val goronAssembly = taskKey[File]("Run sbt-assembly then optimize with goron")
     val goronEntryPoints = settingKey[Seq[String]]("Entry point classes for reachability analysis (internal names, e.g. com/example/Main)")
-    val goronJar = taskKey[File]("Path to the goron optimizer jar")
+    val goronVersion = settingKey[String]("Goron optimizer version to resolve")
     val goronJavaOptions = settingKey[Seq[String]]("JVM options for the forked goron process")
     val goronVerbose = settingKey[Boolean]("Enable verbose goron output")
     val goronInlinerEnabled = settingKey[Boolean]("Enable the inliner")
@@ -41,21 +46,10 @@ object GoronPlugin extends AutoPlugin {
   import autoImport._
 
   override lazy val projectSettings: Seq[Setting[_]] = Seq(
+    ivyConfigurations += GoronConfig,
+    goronVersion := "0.1.0-SNAPSHOT",
+    libraryDependencies += "org.scala-lang" % "goron_2.13" % goronVersion.value % GoronConfig,
     goronEntryPoints := Seq.empty,
-    goronJar := {
-      // By default, look for goron.jar in the project root or download from a known location.
-      // Users should set this to point to their goron build.
-      val candidates = Seq(
-        baseDirectory.value / "goron.jar",
-        baseDirectory.value / ".." / "goron.jar",
-      )
-      candidates.find(_.exists()).getOrElse {
-        sys.error(
-          "goron.jar not found. Set goronJar in your build.sbt, e.g.:\n" +
-          "  goronJar := file(\"/path/to/goron.jar\")"
-        )
-      }
-    },
     goronJavaOptions := Seq("-Xmx2g", "-Xms512m"),
     goronVerbose := false,
     goronInlinerEnabled := true,
@@ -72,7 +66,16 @@ object GoronPlugin extends AutoPlugin {
         if (explicit.nonEmpty) explicit
         else (assembly / mainClass).value.map(_.replace('.', '/')).toSeq
       }
-      val jar = goronJar.value
+
+      // Resolve goron and its dependencies from the GoronConfig configuration
+      val goronClasspath = update.value
+        .select(configurationFilter(GoronConfig.name))
+        .map(_.getAbsolutePath)
+        .mkString(java.io.File.pathSeparator)
+
+      if (goronClasspath.isEmpty)
+        sys.error("Could not resolve goron. Run `sbt publishLocal` in the goron project first.")
+
       val javaOpts = goronJavaOptions.value
       val verbose = goronVerbose.value
       val inliner = goronInlinerEnabled.value
@@ -99,7 +102,7 @@ object GoronPlugin extends AutoPlugin {
       val javaBin = javaHome.map(_ / "bin" / "java").getOrElse(file("java"))
 
       val cmd = Seq(javaBin.getAbsolutePath) ++ javaOpts ++
-        Seq("-cp", jar.getAbsolutePath, "goron.GoronCli") ++ args
+        Seq("-cp", goronClasspath, "goron.GoronCli") ++ args
 
       log.debug(s"Running: ${cmd.mkString(" ")}")
 
