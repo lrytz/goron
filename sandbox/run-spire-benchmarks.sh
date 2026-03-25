@@ -182,10 +182,10 @@ echo
 
 log "Comparing results..."
 echo
-python3 - << 'PYEOF'
+WORK_DIR="$WORK_DIR" python3 - << 'PYEOF'
 import csv, sys, os
 
-work_dir = os.environ.get("WORK_DIR", "sandbox/spire-goron-test")
+work_dir = os.environ["WORK_DIR"]
 stock_file = os.path.join(work_dir, "stock-results.csv")
 goron_file = os.path.join(work_dir, "goron-results.csv")
 
