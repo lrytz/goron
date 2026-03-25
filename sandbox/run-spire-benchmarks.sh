@@ -211,44 +211,61 @@ param_hdr = param_cols[0] if param_cols else ""
 has_params = any(p != () and any(v for v in p) for p in
                  set(k[1] for k in stock) | set(k[1] for k in goron))
 
-hdr_fmt = "{:<55s} " + ("{:>10s} " if has_params else "") + "{:>12s} {:>12s} {:>8s}"
-row_fmt = "{:<55s} " + ("{:>10s} " if has_params else "") + "{:>12.1f} {:>12.1f} {:>8s}"
+hdr_fmt = "{:<55s} " + ("{:>10s} " if has_params else "") + "{:>14s} {:>14s} {:>8s} {:>6s}"
+row_fmt = "{:<55s} " + ("{:>10s} " if has_params else "") + "{:>14s} {:>14s} {:>8s} {:>6s}"
 
 hdr_args = ["Benchmark"]
 if has_params:
     hdr_args.append(param_hdr)
-hdr_args += ["Stock (us)", "Goron (us)", "Change"]
+hdr_args += ["Stock (us)", "Goron (us)", "Change", "Sig?"]
 print(hdr_fmt.format(*hdr_args))
-print("-" * (100 if has_params else 90))
+print("-" * (110 if has_params else 100))
 
-improvements = []
+# Confidence intervals overlap check:
+# JMH reports 99.9% CI as score +/- error. If the intervals
+# [s - s_err, s + s_err] and [g - g_err, g + g_err] overlap,
+# the difference is not statistically significant.
+def intervals_overlap(s, s_err, g, g_err):
+    return (s - s_err) <= (g + g_err) and (g - g_err) <= (s + s_err)
+
+significant = []
 for key in sorted(stock.keys()):
     if key not in goron:
         continue
     s_score, s_err = stock[key]
     g_score, g_err = goron[key]
     pct = (g_score - s_score) / s_score * 100
-    improvements.append(pct)
+    overlap = intervals_overlap(s_score, s_err, g_score, g_err)
 
     name = key[0].replace("spire.benchmark.", "")
     sign = "+" if pct > 0 else ""
     change_str = f"{sign}{pct:.1f}%"
+    sig_str = "  ~" if overlap else " YES"
+    # Format score +/- error
+    s_str = f"{s_score:.1f} +/- {s_err:.1f}"
+    g_str = f"{g_score:.1f} +/- {g_err:.1f}"
 
     row_args = [name]
     if has_params:
         param_val = key[1][0] if key[1] else ""
         row_args.append(param_val)
-    row_args += [s_score, g_score, change_str]
+    row_args += [s_str, g_str, change_str, sig_str]
     print(row_fmt.format(*row_args))
 
-if improvements:
+    if not overlap:
+        significant.append(pct)
+
+total = len([k for k in stock if k in goron])
+if total:
     print()
-    avg = sum(improvements) / len(improvements)
-    sign = "+" if avg > 0 else ""
-    better = sum(1 for x in improvements if x < -0.5)
-    worse = sum(1 for x in improvements if x > 0.5)
-    neutral = len(improvements) - better - worse
-    print(f"Summary: {len(improvements)} benchmarks, "
-          f"{better} faster, {neutral} neutral, {worse} slower, "
-          f"avg change: {sign}{avg:.1f}%")
+    n_sig = len(significant)
+    better = sum(1 for x in significant if x < 0)
+    worse = sum(1 for x in significant if x > 0)
+    print(f"Summary: {total} benchmarks, {n_sig} significant differences "
+          f"({better} faster, {worse} slower), "
+          f"{total - n_sig} inconclusive (CIs overlap)")
+    if significant:
+        avg = sum(significant) / len(significant)
+        sign = "+" if avg > 0 else ""
+        print(f"Mean change (significant only): {sign}{avg:.1f}%")
 PYEOF
