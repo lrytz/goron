@@ -152,7 +152,7 @@ fi
 
 # --- Step 8: Run stock benchmark ---
 
-JMH_ARGS=($JMH_OPTS "${EXTRA_ARGS[@]}")
+JMH_ARGS=($JMH_OPTS "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}")
 if [[ -n "$BENCHMARK_FILTER" ]]; then
   JMH_ARGS+=("$BENCHMARK_FILTER")
 fi
