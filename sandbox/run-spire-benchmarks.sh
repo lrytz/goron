@@ -30,8 +30,8 @@ WORK_DIR="$SCRIPT_DIR/spire-goron-test"
 GORON_JAR="$PROJECT_DIR/target/scala-2.13/goron.jar"
 
 # Default JMH settings — override with JMH_OPTS env var
-# These are conservative defaults; increase for production runs
-: "${JMH_OPTS:=-f 2 -wi 5 -i 5 -w 3 -r 3}"
+# Light defaults; for rigorous results use e.g. JMH_OPTS="-f 3 -wi 5 -i 5 -w 3 -r 3"
+: "${JMH_OPTS:=-f 1 -wi 3 -i 3 -w 2 -r 2}"
 
 # --- Parse arguments ---
 
