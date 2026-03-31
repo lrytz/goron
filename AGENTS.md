@@ -1,5 +1,15 @@
 # Goron: Link-Time Optimizer for JVM Bytecode
 
+## Agents Behavior
+
+- Think before acting. Read existing files before writing code.
+- Be concise in responses but thorough in reasoning.
+- No sycophantic openers or closing fluff.
+- No em dashes, smart quotes, or Unicode characters. ASCII only.
+- Keep solutions simple and direct. No over-engineering.
+- If unsure: say so. Never guess or invent file paths and function names.
+- User instructions take precedence over this file.
+
 ## What is Goron?
 
 Goron is a standalone link-time optimizer that takes one or more JVM jars as input and produces a single optimized jar. It performs cross-jar inlining, closure optimization, dead code elimination, and closed-world optimizations. It works on any JVM bytecode but benefits most from Scala 2.13 code (which includes `ScalaInlineInfo` classfile attributes).
